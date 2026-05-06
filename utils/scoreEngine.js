@@ -1,29 +1,38 @@
 /**
  * ============================================================
- * 신뢰 점수(Trust Score) 산출 엔진 — 6단계 버전
+ * 신뢰 점수(Trust Score) 산출 엔진 — 5단계 가맹점 본질 모델
  * ============================================================
  *
- * [점수 체계] 총 100점
+ * [점수 체계] 총 100점 (가맹점 결제계좌 유치 본질 반영)
  * ┌────────────────────────────────────┬──────┬──────────────────────────────────┐
  * │ 검증 항목                           │ 최대  │ 기준                              │
  * ├────────────────────────────────────┼──────┼──────────────────────────────────┤
- * │ 1. 기본 검증      (국세청)           │ 30점 │ 계속사업자 여부                    │
- * │ 2. 활동성 검증    (국민연금)          │ 10점 │ 직장가입자 수 기반 가점             │
- * │ 3. 실재성 검증    (상권정보/소진공)   │ 15점 │ 좌표 기반 교차검증                 │
- * │ 4. 행정인허가     (행정안전부)        │ 15점 │ 업종별 인허가 유효 여부             │
- * │ 5. 건물현황       (국토교통부)        │ 10점 │ 건축물대장 주소 확인               │
- * │ 6. 금융활동 검증  (BC카드 FDS)       │ 20점 │ 카드매출 패턴 분석 (FDS)           │
+ * │ 1. 기본 검증     (국세청)            │ 20점 │ 계속사업자 여부                    │
+ * │ 2. 사업장 위치   (네이버+소진공)     │ 20점 │ 좌표 기반 교차검증                 │
+ * │ 3. 영업 인허가   (행정안전부)        │ 15점 │ 업종별 인허가 유효 여부             │
+ * │ 4. 카드 FDS      (BC카드)            │ 30점 │ 카드매출 패턴 분석 (가맹점 본질)    │
+ * │ 5. 홈택스 매출   (국세청)            │ 15점 │ 부가세 신고·세금계산서·체납         │
  * └────────────────────────────────────┴──────┴──────────────────────────────────┘
  *
+ * [비중 의도]
+ *   - 매장 실재 검증 55점 (국세청 + 위치 + 인허가)
+ *   - 카드 결제 검증 45점 (FDS + 홈택스)
+ *   - 카드 FDS 30점 = "가맹점 = 카드 결제 받는 매장" 본질 강조
+ *
+ * [제거 항목]
+ *   - 건축물대장 (10점): 위치 검증과 중복 (services/mockBuilding.service.js deprecated)
+ *   - 국민연금 (10점): 1인 가맹점 사업자 차별 (services/mockPension.service.js deprecated)
+ *
  * [판정 기준]
- * - APPROVED (승인): 80점 이상 → 한도제한계좌 즉시 해제
- * - PENDING  (보류): 50~79점  → 추가 서류 제출 요청
- * - REJECTED (거절): 49점 이하 → 비대면 해제 불가, 영업점 방문 안내
+ *   - APPROVED (승인): 80점 이상 + FDS 정상 → 한도제한계좌 즉시 해제
+ *   - PENDING  (보류): 50~79점 또는 FDS 미정상 → 추가 서류 제출
+ *   - REJECTED (거절): 49점 이하 → 영업점 방문
+ *   - FDS 이상거래 감지: 점수 무관 PENDING
  */
 
 const SCORE_THRESHOLDS = { APPROVED: 80, PENDING: 50 };
 
-// ── 1단계: 국세청 기본 검증 ───────────────────────────────────
+// ── 1단계: 국세청 기본 검증 (20점) ────────────────────────────
 function calcNtsScore(ntsResult) {
   if (!ntsResult || ntsResult.businessStatus !== 'ACTIVE') {
     const reason = ntsResult?.businessStatus === 'SUSPENDED' ? '휴업 사업자'
@@ -32,66 +41,51 @@ function calcNtsScore(ntsResult) {
     return { score: 0, detail: `계속사업자 확인 실패 (${reason})`, passed: false };
   }
   return {
-    score: 30,
+    score: 20,
     detail: `계속사업자 확인 완료 (${ntsResult.businessStatusText || '계속사업자'}${ntsResult.companyName ? ' · ' + ntsResult.companyName : ''})`,
     passed: true,
   };
 }
 
-// ── 2단계: 국민연금 활동성 검증 (10점) ───────────────────────
-function calcPensionScore(pensionResult) {
-  if (!pensionResult || !pensionResult.employeeCount) {
-    return { score: 0, detail: '국민연금 가입 내역 없음 (1인 사업자 또는 미가입)', passed: false };
-  }
-  const count = pensionResult.employeeCount;
-  if (count >= 10) return { score: 10, detail: `직원 ${count}명 국민연금 가입 확인 (10명 이상)`, passed: true };
-  if (count >= 5)  return { score: 7,  detail: `직원 ${count}명 국민연금 가입 확인 (5~9명)`, passed: true };
-  if (count >= 1)  return { score: 4,  detail: `직원 ${count}명 국민연금 가입 확인 (1~4명)`, passed: true };
-  return { score: 0, detail: '등록 직원 없음', passed: false };
-}
-
-// ── 3단계: 상권정보 실재성 검증 ──────────────────────────────
-// licenseResult를 받아 인허가 주소로도 교차검증 가능
+// ── 2단계: 사업장 위치 검증 (20점) ────────────────────────────
 function calcLocationScore(locationResult, licenseResult) {
   if (!locationResult || !locationResult.matched) {
     return { score: 0, detail: locationResult?.detail || '사업장 위치 확인 불가', passed: false };
   }
   if (locationResult.confidence === 'HIGH') {
     return {
-      score: 15,
+      score: 20,
       detail: `네이버 + 상권정보 DB 교차검증 완료 · ${locationResult.matchedStoreName || ''}`,
       passed: true,
     };
   }
   // SBIZ 교차검증 실패 시 인허가 주소로 교차검증 시도
   if (licenseResult?.hasLicense && licenseResult?.address && locationResult?.address) {
-    // 주소에서 구/동 단위 겹치면 교차검증 인정
     const locAddr = locationResult.address || '';
     const licAddr = licenseResult.address || '';
-    const extractKeys = addr => (addr.match(/[\uAC00-\uD7A3]+[구동로길읍면리]/g) || []).filter(k => k.length >= 2);
+    const extractKeys = addr => (addr.match(/[가-힣]+[구동로길읍면리]/g) || []).filter(k => k.length >= 2);
     const locKeys = extractKeys(locAddr);
     const licKeys = extractKeys(licAddr);
     const overlap = locKeys.some(k => licKeys.includes(k));
     if (overlap) {
       return {
-        score: 15,
+        score: 20,
         detail: `네이버 + 행정인허가 주소 교차검증 완료 · ${locationResult.matchedStoreName || ''}`,
         passed: true,
       };
     }
   }
   return {
-    score: 9,
+    score: 12,
     detail: `위치 확인 완료 (단일 소스 · 교차검증 미완료)`,
     passed: true,
   };
 }
 
-// ── 4단계: 행정인허가 합법성 검증 ────────────────────────────
+// ── 3단계: 행정인허가 (15점) ──────────────────────────────────
 function calcLicenseScore(licenseResult) {
   if (!licenseResult || !licenseResult.hasLicense) {
     const detail = licenseResult?.detail || '행정인허가 조회 결과 없음';
-    // 폐업으로 인한 말소는 실패, 미취득은 warning
     const isClosed = licenseResult?.licenseStatus === '폐업';
     return { score: 0, detail, passed: false, warned: !isClosed };
   }
@@ -102,39 +96,17 @@ function calcLicenseScore(licenseResult) {
   };
 }
 
-// ── 5단계: 건물현황 검증 ──────────────────────────────────────
-function calcBuildingScore(buildingResult) {
-  if (!buildingResult || !buildingResult.exists) {
-    return { score: 0, detail: buildingResult?.detail || '건축물대장 미등재', passed: false };
-  }
-  if (buildingResult.isCommercial) {
-    return {
-      score: 10,
-      detail: buildingResult.detail || `건축물대장 확인 완료 — ${buildingResult.mainPurpose}`,
-      passed: true,
-    };
-  }
-  // 건물은 있지만 주거 전용인 경우 부분 인정
-  return {
-    score: 5,
-    detail: `건물 존재 확인 (${buildingResult.mainPurpose || '용도 미분류'}) — 상업용 아님`,
-    passed: false,
-  };
-}
-
-// ── 6단계: 금융활동 검증 (20점) — BC카드 FDS ────────────────
-// 최근 6개월 카드매출 패턴 분석: 거래건수, 거래금액, 고객수(중복제거), 월별 추이
-// FDS 정상 시 기존 서류 5종(부가세·납세증명서·세금계산서·재무제표·공급계약서) 대체
+// ── 4단계: 카드 FDS (30점) — BC카드 ──────────────────────────
+// 가맹점 본질: 카드 결제 받는 매장. 최근 6개월 매출 패턴 분석.
+// FDS 정상 시 기존 서류 5종(부가세·납세증명서·세금계산서·재무제표·공급계약서) 대체.
 function calcSalesScore(salesResult) {
   if (!salesResult || !salesResult.hasData) {
-    return { score: 0, detail: '금융 활동 데이터 없음 (매출 이력 미확인)', passed: false };
+    return { score: 0, detail: '카드매출 데이터 없음 (가맹점 미운영 또는 신설)', passed: false };
   }
-
-  // 이상거래 탐지 (BC카드 FDS)
   if (salesResult.anomalyFlag) {
     return {
       score: 0,
-      detail: '매출 패턴 이상 감지 — 추가 확인 필요',
+      detail: '카드매출 패턴 이상 감지 — 추가 확인 필요',
       passed: false,
       anomalyFlag: true,
     };
@@ -155,21 +127,32 @@ function calcSalesScore(salesResult) {
     ? `월평균 ${(salesResult.avgMonthlySales / 10000).toFixed(0)}만원`
     : '확인';
 
-  if (salesResult.dataType === 'CARD_AND_ETAX') {
+  // 만점 (30점): STEADY + DIVERSE + (CARD_AND_ETAX)
+  const isOptimal = salesResult.salesPattern === 'STEADY' && salesResult.customerDiversity === 'DIVERSE';
+  if (salesResult.dataType === 'CARD_AND_ETAX' && isOptimal) {
     return {
-      score: 20,
-      detail: `카드매출 + 전자세금계산서 확인 (최근 ${months}개월 · ${avgSales}${patternNote})`,
+      score: 30,
+      detail: `카드매출 + 전자세금계산서 정상 (최근 ${months}개월 · ${avgSales}${patternNote})`,
       passed: true,
     };
   }
-  if (salesResult.dataType === 'CARD_ONLY') {
+  // 양호 (24점): CARD_ONLY + STEADY + DIVERSE
+  if (salesResult.dataType === 'CARD_ONLY' && isOptimal) {
     return {
-      score: 14,
+      score: 24,
+      detail: `카드매출 정상 (최근 ${months}개월 · ${avgSales}${patternNote})`,
+      passed: true,
+    };
+  }
+  // 부분 (16점): 데이터 있으나 패턴 불규칙 (IRREGULAR/CONCENTRATED 등)
+  if (salesResult.dataType === 'CARD_AND_ETAX' || salesResult.dataType === 'CARD_ONLY') {
+    return {
+      score: 16,
       detail: `카드매출 확인 (최근 ${months}개월 · ${avgSales}${patternNote})`,
       passed: true,
     };
   }
-  // 기타
+  // 기타 (8점)
   return {
     score: 8,
     detail: salesResult.detail || '보완 데이터 확인',
@@ -177,8 +160,43 @@ function calcSalesScore(salesResult) {
   };
 }
 
-// ── 업력 산출 (연 단위) ──────────────────────────────────────
-const BUSINESS_YEARS_THRESHOLD = 2; // 업력 기준: 2년
+// ── 5단계: 홈택스 매출 (15점) — 신규 ──────────────────────────
+// 부가세 분기별 신고 + 전자세금계산서 + 체납 여부.
+// 실연동: 홈택스 오픈 API 미제공 → 민간 API(CODEF 등) 활성화 예정.
+function calcHometaxScore(hometaxResult) {
+  if (!hometaxResult || !hometaxResult.hasData) {
+    return { score: 0, detail: hometaxResult?.detail || '홈택스 신고 이력 없음', passed: false };
+  }
+  if (hometaxResult.taxArrears) {
+    return { score: 0, detail: '체납 이력 확인 — 한도 해제 불가', passed: false };
+  }
+  // status: NORMAL(만점 15) / PARTIAL(부분 7) / NEW(신설 5) / NONE(0)
+  if (hometaxResult.status === 'NORMAL') {
+    return {
+      score: 15,
+      detail: hometaxResult.detail || `최근 4분기 부가세 신고 정상 · 체납 없음`,
+      passed: true,
+    };
+  }
+  if (hometaxResult.status === 'PARTIAL') {
+    return {
+      score: 7,
+      detail: hometaxResult.detail || `부가세 신고 일부 누락 또는 매출 급감 의심`,
+      passed: true,
+    };
+  }
+  if (hometaxResult.status === 'NEW') {
+    return {
+      score: 5,
+      detail: hometaxResult.detail || `신설 사업자 — 검증 데이터 부족`,
+      passed: true,
+    };
+  }
+  return { score: 0, detail: hometaxResult.detail || '홈택스 신고 이력 없음', passed: false };
+}
+
+// ── 업력 산출 (연 단위) — APPROVED 분기 판정용 ────────────────
+const BUSINESS_YEARS_THRESHOLD = 2;
 
 function calcBusinessYears(registrationDate) {
   if (!registrationDate) return 0;
@@ -189,75 +207,66 @@ function calcBusinessYears(registrationDate) {
 }
 
 // ── 판정 ─────────────────────────────────────────────────────
-// 대포통장 방지: BC카드 FDS + 국민연금/업력 복합 판정
+// 가맹점 본질 판정: FDS + 홈택스 + 업력
 //
 // [80점 이상 판정 흐름]
 //   FDS 이상거래 감지 → 무조건 PENDING
-//   FDS 정상 + (국민연금 1명+ OR 업력 2년+) → APPROVED (서류 0건)
-//   FDS 정상 + 국민연금 0명 + 업력 짧음 → PENDING (신설사업자 서류 2종)
-//   카드매출 없음 + 국민연금 0명 + 업력 짧음 → PENDING (서류 제출)
-//
-// [기존 사업자 서류 대체]
-//   BC카드 FDS 최근 6개월 매출 패턴 분석으로
-//   부가세과세표준증명원·납세증명서·세금계산서·재무제표·물품공급계약서 5종 대체
-function getVerdict(totalScore, { pensionResult, ntsResult, salesResult } = {}) {
-  // 매출 이상거래 감지 시 무조건 PENDING
+//   FDS 정상(STEADY+DIVERSE) + (홈택스 NORMAL OR 업력 2년+) → APPROVED (서류 0건)
+//   FDS 정상 + 홈택스/업력 미충족 → PENDING (신설 사업자 서류 2종)
+//   FDS 데이터 없음 + 80점 미달 → 일반 PENDING/REJECTED
+function getVerdict(totalScore, { ntsResult, salesResult, hometaxResult } = {}) {
   if (salesResult?.anomalyFlag) {
     return {
       verdict: 'PENDING',
-      label: '매출 패턴 확인 필요',
-      description: '매출 패턴에 이상이 감지되었습니다. 추가 확인이 필요합니다.',
+      label: '카드매출 패턴 확인 필요',
+      description: '카드매출 패턴에 이상이 감지되었습니다. 추가 확인이 필요합니다.',
+      color: '#FFB800',
+    };
+  }
+  if (hometaxResult?.taxArrears) {
+    return {
+      verdict: 'PENDING',
+      label: '체납 확인 필요',
+      description: '홈택스 체납 이력이 확인되었습니다. 영업점 추가 확인이 필요합니다.',
       color: '#FFB800',
     };
   }
 
   if (totalScore >= SCORE_THRESHOLDS.APPROVED) {
-    const hasEmployees = (pensionResult?.employeeCount || 0) >= 1;
     const businessYears = calcBusinessYears(ntsResult?.registrationDate);
     const isEstablished = businessYears >= BUSINESS_YEARS_THRESHOLD;
-    const hasSalesData = salesResult?.hasData && !salesResult?.anomalyFlag;
-    const fdsNormal = hasSalesData && salesResult?.salesPattern === 'STEADY' && salesResult?.customerDiversity === 'DIVERSE';
+    const fdsNormal = salesResult?.hasData && !salesResult?.anomalyFlag &&
+                      salesResult?.salesPattern === 'STEADY' && salesResult?.customerDiversity === 'DIVERSE';
+    const hometaxNormal = hometaxResult?.hasData && hometaxResult?.status === 'NORMAL';
 
-    if (fdsNormal && (hasEmployees || isEstablished)) {
-      // 최상: FDS 정상 + (국민연금 OR 업력) → 즉시 해제, 서류 0건
-      const reasons = [];
-      if (hasEmployees) reasons.push(`국민연금 ${pensionResult.employeeCount}명`);
+    if (fdsNormal && (hometaxNormal || isEstablished)) {
+      // 최상: FDS 정상 + (홈택스 정상 OR 업력) → 즉시 해제, 서류 0건
+      const reasons = ['카드매출 FDS 정상'];
+      if (hometaxNormal) reasons.push('홈택스 신고 정상');
       if (isEstablished) reasons.push(`업력 ${businessYears.toFixed(1)}년`);
-      reasons.push('카드매출 FDS 정상');
       return {
         verdict: 'APPROVED',
         label: '한도 해제 승인',
-        description: `모든 검증을 통과했습니다. 한도제한계좌가 즉시 해제됩니다. (${reasons.join(' · ')})`,
+        description: `정상 운영 가맹점으로 확인되었습니다. 한도제한계좌가 즉시 해제됩니다. (${reasons.join(' · ')})`,
         color: '#00C3A5',
       };
-    } else if ((hasEmployees || isEstablished) && hasSalesData) {
-      // FDS 데이터는 있으나 패턴 미확인 + 국민연금/업력 OK → 승인
-      const reason = hasEmployees
-        ? `국민연금 ${pensionResult.employeeCount}명 확인`
-        : `업력 ${businessYears.toFixed(1)}년 확인`;
+    } else if (fdsNormal || hometaxNormal || isEstablished) {
+      // FDS 또는 홈택스 또는 업력 중 하나라도 OK → 승인 (총점이 80이라는 점이 보강)
+      const reasons = [];
+      if (fdsNormal) reasons.push('카드매출 FDS 정상');
+      if (hometaxNormal) reasons.push('홈택스 신고 정상');
+      if (isEstablished) reasons.push(`업력 ${businessYears.toFixed(1)}년`);
       return {
         verdict: 'APPROVED',
         label: '한도 해제 승인',
-        description: `모든 검증을 통과했습니다. 한도제한계좌가 즉시 해제됩니다. (${reason})`,
-        color: '#00C3A5',
-      };
-    } else if (hasEmployees || isEstablished) {
-      // 카드매출 없지만 국민연금/업력 OK → 승인 (현금 위주 업종)
-      const reason = hasEmployees
-        ? `국민연금 ${pensionResult.employeeCount}명 확인`
-        : `업력 ${businessYears.toFixed(1)}년 확인`;
-      return {
-        verdict: 'APPROVED',
-        label: '한도 해제 승인',
-        description: `모든 검증을 통과했습니다. 한도제한계좌가 즉시 해제됩니다. (${reason})`,
+        description: `정상 운영 가맹점으로 확인되었습니다. 한도제한계좌가 즉시 해제됩니다. (${reasons.join(' · ')})`,
         color: '#00C3A5',
       };
     } else {
-      // 국민연금 0명 + 업력 짧음 → 신설사업자 서류 필요
       return {
         verdict: 'PENDING',
         label: '추가 서류 필요',
-        description: `점수 기준은 통과했으나, 신설 사업자로 분류되어 실사 서류가 필요합니다. (업력 ${businessYears.toFixed(1)}년)`,
+        description: '점수 기준은 통과했으나, 신설 사업자로 분류되어 실사 서류가 필요합니다.',
         color: '#FFB800',
       };
     }
@@ -279,24 +288,22 @@ function getVerdict(totalScore, { pensionResult, ntsResult, salesResult } = {}) 
 }
 
 /**
- * 전체 신뢰 점수 산출
- * @param {{ nts, pension, location, license, building, sales }} allResults
+ * 전체 신뢰 점수 산출 (5단계)
+ * @param {{ nts, location, license, sales, hometax }} allResults
  */
 function calculateTrustScore(allResults) {
-  const { nts, pension, location, license, building, sales } = allResults;
+  const { nts, location, license, sales, hometax } = allResults;
 
   const ntsScore      = calcNtsScore(nts);
-  const pensionScore  = calcPensionScore(pension);
   const locationScore = calcLocationScore(location, license);
   const licenseScore  = calcLicenseScore(license);
-  const buildingScore = calcBuildingScore(building);
   const salesScore    = calcSalesScore(sales);
+  const hometaxScore  = calcHometaxScore(hometax);
 
   const totalScore =
-    ntsScore.score + pensionScore.score + locationScore.score +
-    licenseScore.score + buildingScore.score + salesScore.score;
+    ntsScore.score + locationScore.score + licenseScore.score +
+    salesScore.score + hometaxScore.score;
 
-  // 업력 정보
   const businessYears = calcBusinessYears(nts?.registrationDate);
 
   return {
@@ -305,32 +312,31 @@ function calculateTrustScore(allResults) {
     percentage: totalScore,
     businessYears: businessYears > 0 ? parseFloat(businessYears.toFixed(1)) : null,
     verdict: getVerdict(totalScore, {
-      pensionResult: pension,
       ntsResult: nts,
       salesResult: sales,
+      hometaxResult: hometax,
     }),
     breakdown: [
-      { step: 1, name: '기본 검증',    icon: '🏛️', source: '국세청',                   maxScore: 30, dataSource: nts?.dataSource      || 'MOCK', ...ntsScore },
-      { step: 2, name: '활동성 검증',  icon: '👥', source: '국민연금공단',               maxScore: 10, dataSource: pension?.dataSource   || 'MOCK', ...pensionScore },
-      { step: 3, name: '실재성 검증',  icon: '📍', source: '소상공인시장진흥공단',       maxScore: 15, dataSource: location?.dataSource  || 'MOCK', ...locationScore },
-      { step: 4, name: '행정인허가',   icon: '📋', source: '행정안전부 지방행정인허가',  maxScore: 15, dataSource: license?.dataSource   || 'MOCK', ...licenseScore },
-      { step: 5, name: '건물현황',     icon: '🏢', source: '국토교통부 건축물대장',      maxScore: 10, dataSource: building?.dataSource  || 'MOCK', ...buildingScore },
-      { step: 6, name: '금융활동 검증',icon: '💳', source: 'BC카드 FDS',                 maxScore: 20, dataSource: sales?.dataSource     || 'MOCK', ...salesScore },
+      { step: 1, name: '기본 검증',     icon: '🏛️', source: '국세청',                  maxScore: 20, dataSource: nts?.dataSource      || 'MOCK', ...ntsScore },
+      { step: 2, name: '사업장 위치',   icon: '📍', source: '네이버 + 소상공인진흥공단', maxScore: 20, dataSource: location?.dataSource || 'MOCK', ...locationScore },
+      { step: 3, name: '영업 인허가',   icon: '📋', source: '행정안전부 지방행정인허가', maxScore: 15, dataSource: license?.dataSource  || 'MOCK', ...licenseScore },
+      { step: 4, name: '카드 FDS',      icon: '💳', source: 'BC카드 (민간 API 활성화 예정)', maxScore: 30, dataSource: sales?.dataSource    || 'MOCK', ...salesScore },
+      { step: 5, name: '홈택스 매출',   icon: '🧾', source: '홈택스 (민간 API 활성화 예정)', maxScore: 15, dataSource: hometax?.dataSource  || 'MOCK', ...hometaxScore },
     ],
   };
 }
 
 /**
- * 단계별 점수를 개별적으로 계산 (SSE 스트리밍 중간 전송용)
+ * 단계별 점수 개별 계산 (SSE 스트리밍 중간 전송용) — 5단계
+ * step: 1=NTS, 2=Location, 3=License, 4=Sales(FDS), 5=Hometax
  */
 function calcStepScore(stepNumber, result, extraResult) {
   switch (stepNumber) {
     case 1: return calcNtsScore(result);
-    case 2: return calcPensionScore(result);
-    case 3: return calcLocationScore(result, extraResult); // extraResult = licenseResult
-    case 4: return calcLicenseScore(result);
-    case 5: return calcBuildingScore(result);
-    case 6: return calcSalesScore(result);
+    case 2: return calcLocationScore(result, extraResult); // extraResult = licenseResult
+    case 3: return calcLicenseScore(result);
+    case 4: return calcSalesScore(result);
+    case 5: return calcHometaxScore(result);
     default: return { score: 0, detail: '', passed: false };
   }
 }

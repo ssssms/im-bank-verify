@@ -41,11 +41,13 @@ const MOCK_SALES_DATA = {
     industryAvgRatio: 1.1, anomalyFlag: false,
     // FDS 분석 (최근 6개월): 월평균 거래 180건, 고객(카드) 162명(중복제거), 고객비율 90%
   },
+  // 기존 데이터 부족 사업자: 카드매출 부분 (불규칙 + 소수 반복) → 부분 점수 (PENDING 보호)
   '9876543210': {
-    hasData: false, dataType: 'NONE', recentMonths: 0,
-    avgMonthlySales: 0, etaxCount: 0,
-    salesPattern: null, customerDiversity: null,
-    industryAvgRatio: null, anomalyFlag: false,
+    hasData: true, dataType: 'CARD_ONLY', recentMonths: 6,
+    avgMonthlySales: 2500000, etaxCount: 0,
+    salesPattern: 'IRREGULAR', customerDiversity: 'CONCENTRATED',
+    industryAvgRatio: 0.45, anomalyFlag: false,
+    // FDS 분석: 영세 매출 + 소수 반복 결제 (단골 위주) → 데이터 부족 의심
   },
   // 신설 사업자: 매출 데이터 없음 (개업 초기)
   '2222222222': {

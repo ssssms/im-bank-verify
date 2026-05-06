@@ -1,22 +1,24 @@
 /**
  * ============================================================
- * 사업자 검증 API 라우터 — 6단계 버전
+ * 사업자 검증 API 라우터 — 5단계 가맹점 본질 모델
  * ============================================================
- * GET  /api/verify/lookup       - 사업자번호 빠른 조회 (입력 시 자동)
- * GET  /api/verify/autocomplete - 상호명 자동완성 (인허가 API 검색)
+ * GET  /api/verify/lookup       - 사업자번호 빠른 조회
+ * GET  /api/verify/autocomplete - 상호명 자동완성
  * POST /api/verify/business     - 전체 검증 (REST 폴백)
  * GET  /api/verify/stream       - 단계별 실시간 검증 (SSE)
+ *
+ * 5단계: 1)NTS → 2)Location → 3)License → 4)Sales(FDS) → 5)Hometax
+ * (구) Pension·Building 단계 제거 (deprecated, 서비스 파일은 보존)
  */
 
 const express = require('express');
 const router = express.Router();
 
 const { checkBusinessStatus } = require('../services/mockNts.service');
-const { getPensionInfo }       = require('../services/mockPension.service');
-const { verifyLocation }       = require('../services/mockLocation.service');
-const { getLicenseInfo }       = require('../services/mockLicense.service');
-const { getBuildingInfo }      = require('../services/mockBuilding.service');
-const { getSalesData }         = require('../services/mockSales.service');
+const { verifyLocation }      = require('../services/mockLocation.service');
+const { getLicenseInfo }      = require('../services/mockLicense.service');
+const { getSalesData }        = require('../services/mockSales.service');
+const { getHometaxData }      = require('../services/mockHometax.service');
 const { calculateTrustScore, calcStepScore } = require('../utils/scoreEngine');
 
 function validateBusinessNumber(raw) {
@@ -28,7 +30,6 @@ function validateBusinessNumber(raw) {
 }
 
 // ── 사업자번호 빠른 조회 ──────────────────────────────────────
-// GET /api/verify/lookup?businessNumber=1234567890
 router.get('/lookup', async (req, res) => {
   const validation = validateBusinessNumber(req.query.businessNumber);
   if (!validation.valid) return res.json({ found: false });
@@ -48,7 +49,6 @@ router.get('/lookup', async (req, res) => {
 });
 
 // ── 상호명 자동완성 (인허가 API 검색) ─────────────────────────
-// GET /api/verify/autocomplete?q=또이스
 const axios = require('axios');
 
 const AUTOCOMPLETE_APIS = [
@@ -68,8 +68,6 @@ router.get('/autocomplete', async (req, res) => {
   if (!serviceKey) return res.json({ results: [] });
 
   const results = [];
-
-  // 모든 업종 API를 병렬로 검색
   await Promise.allSettled(
     AUTOCOMPLETE_APIS.map(async (api) => {
       try {
@@ -98,7 +96,6 @@ router.get('/autocomplete', async (req, res) => {
     })
   );
 
-  // 중복 제거 (이름+주소 기준) 후 최대 10개
   const seen = new Set();
   const unique = results.filter(r => {
     const key = r.name + r.address;
@@ -130,32 +127,26 @@ router.post('/business', async (req, res) => {
   try {
     const ntsResult = await checkBusinessStatus(cleanBizNum);
 
-    let pensionResult  = null;
     let locationResult = null;
     let licenseResult  = null;
-    let buildingResult = null;
     let salesResult    = null;
+    let hometaxResult  = null;
 
     if (ntsResult.businessStatus === 'ACTIVE') {
-      // 위치 검증을 먼저 실행하여 주소를 인허가·건물현황 검증에 활용
-      [pensionResult, locationResult, salesResult] =
-        await Promise.all([
-          getPensionInfo(cleanBizNum),
-          verifyLocation(cleanBizNum, name),
-          getSalesData(cleanBizNum, name),
-        ]);
+      // 위치 검증을 먼저 실행하여 주소를 인허가 검증에 활용
+      [locationResult, salesResult, hometaxResult] = await Promise.all([
+        verifyLocation(cleanBizNum, name),
+        getSalesData(cleanBizNum, name),
+        getHometaxData(cleanBizNum),
+      ]);
       // 인허가: location 주소로 프랜차이즈 지점 매칭
       const locAddr = locationResult?.address || locationResult?.jibunAddress || null;
       licenseResult = await getLicenseInfo(cleanBizNum, name, locAddr);
-      // 건물현황: location에서 얻은 지번 주소 활용 (건축물대장 API는 지번 기반)
-      const buildingAddress = locationResult?.jibunAddress || locationResult?.address || null;
-      buildingResult = await getBuildingInfo(cleanBizNum, buildingAddress);
     }
 
     const trustScore = calculateTrustScore({
-      nts: ntsResult, pension: pensionResult,
-      location: locationResult, license: licenseResult,
-      building: buildingResult, sales: salesResult,
+      nts: ntsResult, location: locationResult, license: licenseResult,
+      sales: salesResult, hometax: hometaxResult,
     });
 
     console.log(`[검증 완료] 점수: ${trustScore.totalScore}점 / 판정: ${trustScore.verdict.verdict}`);
@@ -173,7 +164,7 @@ router.post('/business', async (req, res) => {
   }
 });
 
-// ── SSE 스트리밍 ──────────────────────────────────────────────
+// ── SSE 스트리밍 (5단계) ──────────────────────────────────────
 router.get('/stream', async (req, res) => {
   const { businessNumber, consentGiven, storeName } = req.query;
 
@@ -207,55 +198,42 @@ router.get('/stream', async (req, res) => {
       detail: ntsScore.detail,
     });
 
-    // 폐업/휴업이면 trustScore 계산 후 종료 (버그 수정: 결과 화면으로 전환되게 포함)
     if (ntsResult.businessStatus !== 'ACTIVE') {
       const trustScore = calculateTrustScore({
-        nts: ntsResult, pension: null, location: null,
-        license: null, building: null, sales: null,
+        nts: ntsResult, location: null, license: null, sales: null, hometax: null,
       });
       send('done', { trustScore, companyName: ntsResult.companyName || name });
       return res.end();
     }
 
-    // ── Step 2: 국민연금 ──────────────────────────────────────
-    send(2, { status: 'loading', message: '국민연금 직장가입자 내역 조회 중...' });
-    const pensionResult = await getPensionInfo(cleanBizNum);
-    const pensionScore  = calcStepScore(2, pensionResult);
-    send(2, {
-      status: pensionResult.employeeCount > 0 ? 'success' : 'warning',
-      result: pensionResult,
-      score:  pensionScore.score,
-      detail: pensionScore.detail,
-    });
-
-    // ── Step 3: 상권정보 위치 검증 ────────────────────────────
-    send(3, { status: 'loading', message: '상권정보 DB 사업장 위치 교차검증 중...' });
+    // ── Step 2: 사업장 위치 ───────────────────────────────────
+    send(2, { status: 'loading', message: '네이버 + 소상공인진흥공단 사업장 위치 교차검증 중...' });
     const locationResult = await verifyLocation(cleanBizNum, name);
-    const locationScore  = calcStepScore(3, locationResult);
-    send(3, {
+    const locationScore  = calcStepScore(2, locationResult);
+    send(2, {
       status: locationResult.matched ? 'success' : 'failed',
       result: locationResult,
       score:  locationScore.score,
       detail: locationScore.detail,
     });
 
-    // ── Step 4: 행정인허가 ────────────────────────────────────
-    send(4, { status: 'loading', message: '행정안전부 지방행정인허가 조회 중...' });
+    // ── Step 3: 영업 인허가 ───────────────────────────────────
+    send(3, { status: 'loading', message: '행정안전부 지방행정인허가 조회 중...' });
     const licenseAddress = locationResult?.address || locationResult?.jibunAddress || null;
     const licenseResult = await getLicenseInfo(cleanBizNum, name, licenseAddress);
-    const licenseScore  = calcStepScore(4, licenseResult);
-    send(4, {
+    const licenseScore  = calcStepScore(3, licenseResult);
+    send(3, {
       status: licenseResult.hasLicense ? 'success' : 'warning',
       result: licenseResult,
       score:  licenseScore.score,
       detail: licenseScore.detail,
     });
 
-    // 인허가 주소로 3단계 교차검증 업그레이드 확인
+    // 인허가 주소로 2단계 위치 교차검증 업그레이드 확인
     if (locationResult?.confidence !== 'HIGH' && licenseResult?.hasLicense) {
-      const upgradedScore = calcStepScore(3, locationResult, licenseResult);
+      const upgradedScore = calcStepScore(2, locationResult, licenseResult);
       if (upgradedScore.score > locationScore.score) {
-        send(3, {
+        send(2, {
           status: 'success',
           result: locationResult,
           score:  upgradedScore.score,
@@ -264,33 +242,32 @@ router.get('/stream', async (req, res) => {
       }
     }
 
-    // ── Step 5: 건물현황 ──────────────────────────────────────
-    send(5, { status: 'loading', message: '국토교통부 건축물대장 주소 확인 중...' });
-    const buildingAddress = locationResult?.jibunAddress || locationResult?.address || null;
-    const buildingResult = await getBuildingInfo(cleanBizNum, buildingAddress);
-    const buildingScore  = calcStepScore(5, buildingResult);
-    send(5, {
-      status: buildingResult.exists ? (buildingResult.isCommercial ? 'success' : 'warning') : 'failed',
-      result: buildingResult,
-      score:  buildingScore.score,
-      detail: buildingScore.detail,
-    });
-
-    // ── Step 6: 금융활동 보완 ─────────────────────────────────
-    send(6, { status: 'loading', message: '카드매출 · 전자세금계산서 확인 중...' });
+    // ── Step 4: 카드 FDS ──────────────────────────────────────
+    send(4, { status: 'loading', message: 'BC카드 매출 패턴 분석 중 (가맹점 본질 검증)...' });
     const salesResult = await getSalesData(cleanBizNum, name);
-    const salesScore  = calcStepScore(6, salesResult);
-    send(6, {
+    const salesScore  = calcStepScore(4, salesResult);
+    send(4, {
       status: salesResult.hasData ? 'success' : 'warning',
       result: salesResult,
       score:  salesScore.score,
       detail: salesScore.detail,
     });
 
+    // ── Step 5: 홈택스 매출 ───────────────────────────────────
+    send(5, { status: 'loading', message: '홈택스 부가세 신고·전자세금계산서 확인 중...' });
+    const hometaxResult = await getHometaxData(cleanBizNum);
+    const hometaxScore  = calcStepScore(5, hometaxResult);
+    send(5, {
+      status: hometaxResult.hasData ? 'success' : 'warning',
+      result: hometaxResult,
+      score:  hometaxScore.score,
+      detail: hometaxScore.detail,
+    });
+
     // ── 최종 결과 ─────────────────────────────────────────────
     const trustScore = calculateTrustScore({
-      nts: ntsResult, pension: pensionResult, location: locationResult,
-      license: licenseResult, building: buildingResult, sales: salesResult,
+      nts: ntsResult, location: locationResult, license: licenseResult,
+      sales: salesResult, hometax: hometaxResult,
     });
     send('done', { trustScore, companyName: ntsResult.companyName || name });
 
