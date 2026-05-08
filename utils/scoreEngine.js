@@ -99,6 +99,22 @@ function calcLicenseScore(licenseResult) {
 // ── 4단계: 카드 FDS (30점) — BC카드 ──────────────────────────
 // 가맹점 본질: 카드 결제 받는 매장. 최근 6개월 매출 패턴 분석.
 // FDS 정상 시 기존 서류 5종(부가세·납세증명서·세금계산서·재무제표·공급계약서) 대체.
+//
+// [차등 점수 임계값 — 시연 Q&A 룰북]
+//   30점 (만점)  : CARD_AND_ETAX + STEADY + DIVERSE
+//                  · 카드매출 + 전자세금계산서 둘 다 발행
+//                  · 월별 매출 변동계수(CV) ≤ 20%       → STEADY
+//                  · 고유 고객수 / 결제건수 ≥ 70%        → DIVERSE
+//                  · 업종 평균 매출의 70~150% 범위
+//   24점 (양호)  : CARD_ONLY + STEADY + DIVERSE
+//                  · 카드매출만, 세금계산서 없음 (B2C 전형: 카페/미용실)
+//                  · 감점 -6 = 매출 교차검증 1축 부족
+//   16점 (주의)  : CARD_* + (IRREGULAR/SUDDEN OR CONCENTRATED)
+//                  · 변동계수 20~50% → IRREGULAR / >50% → SUDDEN
+//                  · 또는 고객 비율 < 30% (단골 위주)    → CONCENTRATED
+//   8점 (최소)   : 위 분류에 안 맞는 보완 케이스
+//   0점 (거절)   : hasData=false (가맹점 미등록) 또는 anomalyFlag=true (이상거래)
+//                  · anomalyFlag=true → 점수 무관 PENDING 강제 (verdict 단계)
 function calcSalesScore(salesResult) {
   if (!salesResult || !salesResult.hasData) {
     return { score: 0, detail: '카드매출 데이터 없음 (가맹점 미운영 또는 신설)', passed: false };
@@ -163,6 +179,20 @@ function calcSalesScore(salesResult) {
 // ── 5단계: 홈택스 매출 (15점) — 신규 ──────────────────────────
 // 부가세 분기별 신고 + 전자세금계산서 + 체납 여부.
 // 실연동: 홈택스 오픈 API 미제공 → 민간 API(CODEF 등) 활성화 예정.
+//
+// [차등 점수 임계값 — 시연 Q&A 룰북]
+//   15점 (NORMAL) : 최근 4분기 모두 부가세 신고 (vatFilingCount = 4)
+//                   · 분기당 전자세금계산서 평균 5건 이상 권장
+//                   · 체납 없음 (taxArrears = false)
+//   7점 (PARTIAL) : 최근 4분기 중 2~3분기만 신고 (vatFilingCount 2~3)
+//                   · 또는 직전 분기 대비 매출 50% 이상 급감 의심
+//                   · 체납 없음
+//   5점 (NEW)     : 1분기만 신고 (vatFilingCount = 1)
+//                   · 사업자 등록 후 12개월 미만 (첫 분기 신고만 도래)
+//                   · 체납 없음
+//   0점 (NONE)    : 신고 이력 전무 (vatFilingCount = 0, hasData=false)
+//                   · 또는 체납 이력 (taxArrears=true)
+//                     → 점수 무관 PENDING 강제 + "한도 해제 불가"
 function calcHometaxScore(hometaxResult) {
   if (!hometaxResult || !hometaxResult.hasData) {
     return { score: 0, detail: hometaxResult?.detail || '홈택스 신고 이력 없음', passed: false };
