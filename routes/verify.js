@@ -1,13 +1,13 @@
 /**
  * ============================================================
- * 사업자 검증 API 라우터 — 5단계 가맹점 본질 모델
+ * 사업자 검증 API 라우터 — 4단계 가맹점 본질 모델
  * ============================================================
  * GET  /api/verify/lookup       - 사업자번호 빠른 조회
  * GET  /api/verify/autocomplete - 상호명 자동완성
  * POST /api/verify/business     - 전체 검증 (REST 폴백)
  * GET  /api/verify/stream       - 단계별 실시간 검증 (SSE)
  *
- * 5단계: 1)NTS → 2)Location → 3)License → 4)Sales(FDS) → 5)Hometax
+ * 4단계: 1)NTS → 2)Location → 3)License → 4)Sales(FDS)
  * (구) Pension·Building 단계 제거 (deprecated, 서비스 파일은 보존)
  */
 
@@ -18,7 +18,7 @@ const { checkBusinessStatus } = require('../services/mockNts.service');
 const { verifyLocation }      = require('../services/mockLocation.service');
 const { getLicenseInfo }      = require('../services/mockLicense.service');
 const { getSalesData }        = require('../services/mockSales.service');
-const { getHometaxData }      = require('../services/mockHometax.service');
+// 홈택스(5단계) 제거 — 4단계 모델. mockHometax.service.js는 롤백 대비 보존, import 안 함.
 const { calculateTrustScore, calcStepScore } = require('../utils/scoreEngine');
 
 function validateBusinessNumber(raw) {
@@ -130,14 +130,12 @@ router.post('/business', async (req, res) => {
     let locationResult = null;
     let licenseResult  = null;
     let salesResult    = null;
-    let hometaxResult  = null;
 
     if (ntsResult.businessStatus === 'ACTIVE') {
       // 위치 검증을 먼저 실행하여 주소를 인허가 검증에 활용
-      [locationResult, salesResult, hometaxResult] = await Promise.all([
+      [locationResult, salesResult] = await Promise.all([
         verifyLocation(cleanBizNum, name),
         getSalesData(cleanBizNum, name),
-        getHometaxData(cleanBizNum),
       ]);
       // 인허가: location 주소로 프랜차이즈 지점 매칭
       const locAddr = locationResult?.address || locationResult?.jibunAddress || null;
@@ -146,7 +144,7 @@ router.post('/business', async (req, res) => {
 
     const trustScore = calculateTrustScore({
       nts: ntsResult, location: locationResult, license: licenseResult,
-      sales: salesResult, hometax: hometaxResult,
+      sales: salesResult,
     });
 
     console.log(`[검증 완료] 점수: ${trustScore.totalScore}점 / 판정: ${trustScore.verdict.verdict}`);
@@ -164,7 +162,7 @@ router.post('/business', async (req, res) => {
   }
 });
 
-// ── SSE 스트리밍 (5단계) ──────────────────────────────────────
+// ── SSE 스트리밍 (4단계) ──────────────────────────────────────
 router.get('/stream', async (req, res) => {
   const { businessNumber, consentGiven, storeName } = req.query;
 
@@ -200,7 +198,7 @@ router.get('/stream', async (req, res) => {
 
     if (ntsResult.businessStatus !== 'ACTIVE') {
       const trustScore = calculateTrustScore({
-        nts: ntsResult, location: null, license: null, sales: null, hometax: null,
+        nts: ntsResult, location: null, license: null, sales: null,
       });
       send('done', { trustScore, companyName: ntsResult.companyName || name });
       return res.end();
@@ -253,21 +251,10 @@ router.get('/stream', async (req, res) => {
       detail: salesScore.detail,
     });
 
-    // ── Step 5: 홈택스 매출 ───────────────────────────────────
-    send(5, { status: 'loading', message: '홈택스 부가세 신고·전자세금계산서 확인 중...' });
-    const hometaxResult = await getHometaxData(cleanBizNum);
-    const hometaxScore  = calcStepScore(5, hometaxResult);
-    send(5, {
-      status: hometaxResult.hasData ? 'success' : 'warning',
-      result: hometaxResult,
-      score:  hometaxScore.score,
-      detail: hometaxScore.detail,
-    });
-
     // ── 최종 결과 ─────────────────────────────────────────────
     const trustScore = calculateTrustScore({
       nts: ntsResult, location: locationResult, license: licenseResult,
-      sales: salesResult, hometax: hometaxResult,
+      sales: salesResult,
     });
     send('done', { trustScore, companyName: ntsResult.companyName || name });
 
