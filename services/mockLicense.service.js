@@ -136,6 +136,20 @@ async function getLicenseLive(storeName, address) {
   // 주소가 있으면 더 많은 결과를 받아서 지점 매칭
   const perPage = address ? 10 : 5;
 
+  // Render 콜드스타트 + data.go.kr 지연으로 조회가 간헐적으로 실패하면
+  // 인허가 0점 → 위치 교차검증도 막혀 12점으로 떨어지므로, 타임아웃을 넉넉히
+  // 두고 일시적 실패(타임아웃/네트워크) 시 1회 재시도한다.
+  const LICENSE_TIMEOUT = 15000;
+  async function getWithRetry(url) {
+    try {
+      return await axios.get(url, { timeout: LICENSE_TIMEOUT });
+    } catch (e) {
+      // 서버 응답이 없는 일시적 오류만 재시도 (403 등 정상 응답 코드는 재시도 무의미)
+      if (e.response) throw e;
+      return await axios.get(url, { timeout: LICENSE_TIMEOUT });
+    }
+  }
+
   for (const { url: path, name } of DATA_GO_KR_LICENSE_APIS) {
     try {
       const url = `https://apis.data.go.kr${path}`
@@ -143,7 +157,7 @@ async function getLicenseLive(storeName, address) {
         + `&perPage=${perPage}&page=1&returnType=json`
         + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(storeName)}`;
 
-      const res = await axios.get(url, { timeout: 8000 });
+      const res = await getWithRetry(url);
 
       const items = res.data?.response?.body?.items?.item;
       if (!items) continue;
