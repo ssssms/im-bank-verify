@@ -18,6 +18,7 @@ const { checkBusinessStatus } = require('../services/mockNts.service');
 const { verifyLocation }      = require('../services/mockLocation.service');
 const { getLicenseInfo }      = require('../services/mockLicense.service');
 const { getSalesData }        = require('../services/mockSales.service');
+const { getCompanyName }      = require('../services/bizno.service'); // 상호명 병렬 보완(참고용)
 // 홈택스(5단계) 제거 — 4단계 모델. mockHometax.service.js는 롤백 대비 보존, import 안 함.
 const { calculateTrustScore, calcStepScore } = require('../utils/scoreEngine');
 
@@ -124,6 +125,9 @@ router.post('/business', async (req, res) => {
 
   console.log(`[검증 시작] 사업자번호: ${cleanBizNum.substring(0, 3)}*******`);
 
+  // 상호명은 국세청 검증과 병렬로 조회(참고용). 실패해도 아래 흐름에 영향 없음.
+  const companyNamePromise = getCompanyName(cleanBizNum);
+
   try {
     const ntsResult = await checkBusinessStatus(cleanBizNum);
 
@@ -149,10 +153,15 @@ router.post('/business', async (req, res) => {
 
     console.log(`[검증 완료] 점수: ${trustScore.totalScore}점 / 판정: ${trustScore.verdict.verdict}`);
 
+    // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → 없으면 '' (프론트에서 '상호명 미확인')
+    const biznoResult = await companyNamePromise;
+    const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
+
     return res.json({
       success: true,
       businessNumber: cleanBizNum.substring(0, 3) + '*'.repeat(7),
-      companyName: ntsResult.companyName || name || '(상호 확인됨)',
+      companyName: resolvedName,
+      companyNameSource: biznoResult.found ? 'BIZNO' : (ntsResult.companyName ? 'NTS' : 'NONE'),
       trustScore,
       verifiedAt: new Date().toISOString(),
     });
@@ -184,6 +193,9 @@ router.get('/stream', async (req, res) => {
 
   const send = (step, data) => res.write(`data: ${JSON.stringify({ step, ...data })}\n\n`);
 
+  // 상호명은 단계 검증과 병렬로 조회(참고용). 완료 시점에만 취합, 실패해도 무영향.
+  const companyNamePromise = getCompanyName(cleanBizNum);
+
   try {
     // ── Step 1: 국세청 ────────────────────────────────────────
     send(1, { status: 'loading', message: '국세청 사업자 상태 조회 중...' });
@@ -200,7 +212,10 @@ router.get('/stream', async (req, res) => {
       const trustScore = calculateTrustScore({
         nts: ntsResult, location: null, license: null, sales: null,
       });
-      send('done', { trustScore, companyName: ntsResult.companyName || name });
+      // 휴/폐업이어도 상호명(참고용)은 표시. 판정은 국세청 기준 그대로.
+      const biznoResult = await companyNamePromise;
+      const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
+      send('done', { trustScore, companyName: resolvedName });
       return res.end();
     }
 
@@ -256,7 +271,10 @@ router.get('/stream', async (req, res) => {
       nts: ntsResult, location: locationResult, license: licenseResult,
       sales: salesResult,
     });
-    send('done', { trustScore, companyName: ntsResult.companyName || name });
+    // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → 없으면 '' (프론트 '상호명 미확인')
+    const biznoResult = await companyNamePromise;
+    const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
+    send('done', { trustScore, companyName: resolvedName });
 
   } catch (err) {
     send('error', { message: err.message });
