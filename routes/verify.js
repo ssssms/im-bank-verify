@@ -108,38 +108,59 @@ router.get('/autocomplete', async (req, res) => {
   return res.json({ results: unique });
 });
 
-// ── [임시 진단] 비즈노 상호명 조회 원본 확인 (키 값은 노출 안 함) ──
+// ── [임시 진단] 비즈노(머니핀) OAuth 흐름 점검 (토큰/시크릿 값은 노출 안 함) ──
 // 사용 후 제거 예정. /api/verify/bizno-debug?businessNumber=8156100363
 router.get('/bizno-debug', async (req, res) => {
   const bno = (req.query.businessNumber || '').replace(/\D/g, '');
-  const key = process.env.BIZNO_API_KEY || '';
-  const endpoint = process.env.BIZNO_API_URL || 'https://api.bizno.net/api/fetch';
+  const BASE = process.env.BIZNO_API_BASE || 'https://api.moneypin.biz';
+  const clientId = process.env.BIZNO_CLIENT_ID || '';
+  const clientSecret = process.env.BIZNO_CLIENT_SECRET || '';
   const out = {
-    keyPresent: !!key && !key.startsWith('your_'),
-    keyLength: key ? key.length : 0,
-    endpoint,
+    base: BASE,
     bno,
+    clientIdPresent: !!clientId && !clientId.startsWith('your_'),
+    clientSecretPresent: !!clientSecret && !clientSecret.startsWith('your_'),
   };
-  if (!out.keyPresent) return res.json({ ...out, note: 'BIZNO_API_KEY 미설정 또는 placeholder' });
-  try {
-    const r = await axios.get(endpoint, {
-      params: { key, gb: 1, q: bno, type: 'json' },
-      timeout: 5000,
-      validateStatus: () => true,
-    });
-    let sample = r.data;
-    // 응답이 너무 크면 앞부분만
-    const asStr = typeof sample === 'string' ? sample : JSON.stringify(sample);
-    return res.json({
-      ...out,
-      httpStatus: r.status,
-      contentType: r.headers['content-type'] || '',
-      rawType: typeof r.data,
-      rawSample: asStr.slice(0, 1500),
-    });
-  } catch (e) {
-    return res.json({ ...out, error: e.code || e.message });
+  if (!out.clientIdPresent || !out.clientSecretPresent) {
+    return res.json({ ...out, note: 'BIZNO_CLIENT_ID / BIZNO_CLIENT_SECRET 둘 다 필요' });
   }
+
+  // 1) 토큰 발급
+  let token = null;
+  try {
+    const tr = await axios.post(BASE + '/bizno/v1/auth/token',
+      { grantType: 'client_credentials', clientId, clientSecret },
+      { timeout: 5000, headers: { 'Content-Type': 'application/json' }, validateStatus: () => true });
+    out.token_httpStatus = tr.status;
+    out.token_responseKeys = tr.data && typeof tr.data === 'object' ? Object.keys(tr.data) : typeof tr.data;
+    // 토큰 값 자체는 노출하지 않고, 어느 필드에 담겼는지만 표시
+    const keys = ['accessToken', 'access_token', 'token', 'authToken', 'jwt'];
+    for (const k of keys) { if (tr.data && typeof tr.data[k] === 'string') { token = tr.data[k]; out.token_field = k; break; } }
+    if (!token && tr.status !== 200) out.token_message = tr.data?.message || tr.data?.error;
+  } catch (e) {
+    return res.json({ ...out, token_error: e.code || e.message });
+  }
+  if (!token) return res.json({ ...out, note: '토큰 발급 실패(응답 필드 확인 필요)' });
+
+  // 2) 빈 바디로 기본정보 호출 → 필수 필드명 노출(예: "bizNumber 값을 확인해주세요")
+  try {
+    const er = await axios.post(BASE + '/bizno/v1/biz/info/base', {},
+      { timeout: 5000, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, validateStatus: () => true });
+    out.info_empty_status = er.status;
+    out.info_empty_message = er.data?.message || er.data?.error || null;
+  } catch (e) { out.info_empty_error = e.code || e.message; }
+
+  // 3) 후보 바디로 실제 조회 → 원본 응답(공개 기업정보)
+  try {
+    const body = { bizNumber: bno, businessNumber: bno, bizNo: bno, bno };
+    const ir = await axios.post(BASE + '/bizno/v1/biz/info/base', body,
+      { timeout: 5000, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, validateStatus: () => true });
+    const asStr = typeof ir.data === 'string' ? ir.data : JSON.stringify(ir.data);
+    out.info_status = ir.status;
+    out.info_rawSample = asStr.slice(0, 1800);
+  } catch (e) { out.info_error = e.code || e.message; }
+
+  return res.json(out);
 });
 
 // ── REST API ──────────────────────────────────────────────────
