@@ -108,6 +108,40 @@ router.get('/autocomplete', async (req, res) => {
   return res.json({ results: unique });
 });
 
+// ── [임시 진단] 비즈노 상호명 조회 원본 확인 (키 값은 노출 안 함) ──
+// 사용 후 제거 예정. /api/verify/bizno-debug?businessNumber=8156100363
+router.get('/bizno-debug', async (req, res) => {
+  const bno = (req.query.businessNumber || '').replace(/\D/g, '');
+  const key = process.env.BIZNO_API_KEY || '';
+  const endpoint = process.env.BIZNO_API_URL || 'https://api.bizno.net/api/fetch';
+  const out = {
+    keyPresent: !!key && !key.startsWith('your_'),
+    keyLength: key ? key.length : 0,
+    endpoint,
+    bno,
+  };
+  if (!out.keyPresent) return res.json({ ...out, note: 'BIZNO_API_KEY 미설정 또는 placeholder' });
+  try {
+    const r = await axios.get(endpoint, {
+      params: { key, gb: 1, q: bno, type: 'json' },
+      timeout: 5000,
+      validateStatus: () => true,
+    });
+    let sample = r.data;
+    // 응답이 너무 크면 앞부분만
+    const asStr = typeof sample === 'string' ? sample : JSON.stringify(sample);
+    return res.json({
+      ...out,
+      httpStatus: r.status,
+      contentType: r.headers['content-type'] || '',
+      rawType: typeof r.data,
+      rawSample: asStr.slice(0, 1500),
+    });
+  } catch (e) {
+    return res.json({ ...out, error: e.code || e.message });
+  }
+});
+
 // ── REST API ──────────────────────────────────────────────────
 router.post('/business', async (req, res) => {
   const { businessNumber, consentGiven, storeName } = req.body;
