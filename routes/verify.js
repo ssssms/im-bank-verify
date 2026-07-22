@@ -36,12 +36,19 @@ router.get('/lookup', async (req, res) => {
   if (!validation.valid) return res.json({ found: false });
 
   try {
-    const ntsResult = await checkBusinessStatus(validation.cleaned);
+    // 국세청(상태) + 비즈노(상호명) 병렬 조회 → 번호 입력 즉시 상호명 표시
+    const [ntsResult, biznoResult] = await Promise.all([
+      checkBusinessStatus(validation.cleaned),
+      getCompanyName(validation.cleaned),
+    ]);
+    // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → ''
+    const companyName = biznoResult.companyName || ntsResult.companyName || '';
     return res.json({
       found: ntsResult.businessStatus === 'ACTIVE',
       businessStatus: ntsResult.businessStatus,
       businessStatusText: ntsResult.businessStatusText || '',
-      companyName: ntsResult.companyName || '',
+      companyName,
+      companyNameSource: biznoResult.found ? 'BIZNO' : (ntsResult.companyName ? 'NTS' : 'NONE'),
       businessType: ntsResult.businessType || '',
     });
   } catch {
