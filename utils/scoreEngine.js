@@ -24,11 +24,13 @@
  *   - 국민연금 (10점): 1인 가맹점 사업자 차별 (services/mockPension.service.js deprecated)
  *
  * [판정 기준]
- *   - APPROVED (승인): 80점 이상 + (FDS 정상 OR 업력 2년+) → 한도제한계좌 즉시 해제
+ *   - APPROVED (승인): 80점 이상 + (FDS 24점+ OR 업력 6개월+) → 한도제한계좌 즉시 해제
  *   - PENDING  (보류): 50~79점 또는 신설(FDS 미정상+업력 부족) → 추가 서류 제출
  *   - REJECTED (거절): 49점 이하 → 영업점 방문
  *   - FDS 이상거래 감지: 점수 무관 PENDING
  */
+
+const { scoreFds } = require('./fdsEngine');
 
 const SCORE_THRESHOLDS = { APPROVED: 80, PENDING: 50 };
 
@@ -97,28 +99,21 @@ function calcLicenseScore(licenseResult) {
 }
 
 // ── 4단계: 카드 FDS (40점) — BC카드 ──────────────────────────
-// 가맹점 본질: 카드 결제 받는 매장. 최근 6개월 매출 패턴 분석.
+// 가맹점 본질: 카드 결제 받는 매장. 최근 6개월 매출 시계열 분석.
 // FDS 정상 시 기존 서류 5종(부가세·납세증명서·세금계산서·재무제표·공급계약서) 대체.
-// (홈택스 매출 15점 제거분 +10을 흡수해 결제검증 단일축으로 강화)
 //
-// [차등 점수 임계값 — 시연 Q&A 룰북]
-//   40점 (만점)  : CARD_AND_ETAX + STEADY + DIVERSE
-//                  · 카드매출 + 전자세금계산서 둘 다 발행
-//                  · 월별 매출 변동계수(CV) ≤ 20%       → STEADY
-//                  · 고유 고객수 / 결제건수 ≥ 70%        → DIVERSE
-//                  · 업종 평균 매출의 70~150% 범위
-//   32점 (양호)  : CARD_ONLY + STEADY + DIVERSE
-//                  · 카드매출만, 세금계산서 없음 (B2C 전형: 카페/미용실)
-//                  · 감점 -8 = 매출 교차검증 1축 부족
-//   20점 (주의)  : CARD_* + (IRREGULAR/SUDDEN OR CONCENTRATED)
-//                  · 변동계수 20~50% → IRREGULAR / >50% → SUDDEN
-//                  · 또는 고객 비율 < 30% (단골 위주)    → CONCENTRATED
-//   10점 (최소)  : 위 분류에 안 맞는 보완 케이스
-//   0점 (거절)   : hasData=false (가맹점 미등록) 또는 anomalyFlag=true (이상거래)
-//                  · anomalyFlag=true → 점수 무관 PENDING 강제 (verdict 단계)
+// [채점 방식] 제안서 「카드매출 FDS 상세 기준(40점)」 그대로의 가산제.
+//   ① 영업 지속성    10점 : 매출 발생 월수 + 월 매출 발생일수
+//   ② 매출 규모·건수 10점 : 월평균 매출건수(최소 월 30건) + 업종 평균 대비 규모
+//   ③ 순고객 분산도  15점 : 순고객수 규모 + 순고객수/매출건수 비율 + 추세  ← 최고 배점
+//   ④ 이상패턴 페널티 5점 : 급증·특정일 집중·동일금액 반복 탐지 시 건당 -2 (감점형)
+//   세부 임계값은 utils/fdsEngine.js 참조.
+//
+//   0점 : hasData=false (가맹점 미등록·신설) 또는 anomalyFlag=true (이상거래 확정)
+//   ④ 감점 4점 이상(패턴 2건 이상) → riskAlert=true → 점수 무관 PENDING 강제
 function calcSalesScore(salesResult) {
   if (!salesResult || !salesResult.hasData) {
-    return { score: 0, detail: '카드매출 데이터 없음 (가맹점 미운영 또는 신설)', passed: false };
+    return { score: 0, detail: '카드매출 데이터 없음 (가맹점 미운영 또는 신설)', passed: false, subScores: [] };
   }
   if (salesResult.anomalyFlag) {
     return {
@@ -126,54 +121,27 @@ function calcSalesScore(salesResult) {
       detail: '카드매출 패턴 이상 감지 — 추가 확인 필요',
       passed: false,
       anomalyFlag: true,
+      subScores: [],
     };
   }
 
-  let patternNote = '';
-  if (salesResult.salesPattern) {
-    const patternMap = { STEADY: '꾸준한 매출', IRREGULAR: '불규칙 매출', SUDDEN: '급등락 매출' };
-    const diversityMap = { DIVERSE: '다양한 고객', CONCENTRATED: '소수 반복 결제' };
-    const parts = [];
-    if (patternMap[salesResult.salesPattern]) parts.push(patternMap[salesResult.salesPattern]);
-    if (diversityMap[salesResult.customerDiversity]) parts.push(diversityMap[salesResult.customerDiversity]);
-    if (parts.length > 0) patternNote = ` · ${parts.join(' · ')}`;
-  }
+  const fds = scoreFds(salesResult);
 
-  const months = salesResult.recentMonths || 6;
-  const avgSales = salesResult.avgMonthlySales
-    ? `월평균 ${(salesResult.avgMonthlySales / 10000).toFixed(0)}만원`
-    : '확인';
+  // 표기용 요약 라벨 (꾸준한 매출 / 다양한 고객 등)
+  const patternMap = { STEADY: '꾸준한 매출', IRREGULAR: '불규칙 매출', SUDDEN: '급등락 매출' };
+  const diversityMap = { DIVERSE: '다양한 고객', CONCENTRATED: '소수 반복 결제' };
+  const labels = [patternMap[salesResult.salesPattern], diversityMap[salesResult.customerDiversity]].filter(Boolean);
+  const patternNote = labels.length ? ` · ${labels.join(' · ')}` : '';
+  const etaxNote = salesResult.dataType === 'CARD_AND_ETAX' ? '카드매출 + 전자세금계산서' : '카드매출';
 
-  // 만점 (40점): STEADY + DIVERSE + (CARD_AND_ETAX)
-  const isOptimal = salesResult.salesPattern === 'STEADY' && salesResult.customerDiversity === 'DIVERSE';
-  if (salesResult.dataType === 'CARD_AND_ETAX' && isOptimal) {
-    return {
-      score: 40,
-      detail: `카드매출 + 전자세금계산서 정상 (최근 ${months}개월 · ${avgSales}${patternNote})`,
-      passed: true,
-    };
-  }
-  // 양호 (32점): CARD_ONLY + STEADY + DIVERSE
-  if (salesResult.dataType === 'CARD_ONLY' && isOptimal) {
-    return {
-      score: 32,
-      detail: `카드매출 정상 (최근 ${months}개월 · ${avgSales}${patternNote})`,
-      passed: true,
-    };
-  }
-  // 부분 (20점): 데이터 있으나 패턴 불규칙 (IRREGULAR/CONCENTRATED 등)
-  if (salesResult.dataType === 'CARD_AND_ETAX' || salesResult.dataType === 'CARD_ONLY') {
-    return {
-      score: 20,
-      detail: `카드매출 확인 (최근 ${months}개월 · ${avgSales}${patternNote})`,
-      passed: true,
-    };
-  }
-  // 기타 (10점)
   return {
-    score: 10,
-    detail: salesResult.detail || '보완 데이터 확인',
-    passed: true,
+    score: fds.score,
+    detail: `${etaxNote} 분석 (${fds.summary}${patternNote})`,
+    passed: fds.score >= 20,
+    riskAlert: fds.riskAlert,
+    subScores: fds.subScores,
+    metrics: fds.metrics,
+    monthly: salesResult.monthly || [],
   };
 }
 
@@ -227,7 +195,9 @@ function calcHometaxScore(hometaxResult) {
 }
 
 // ── 업력 산출 (연 단위) — APPROVED 분기 판정용 ────────────────
-const BUSINESS_YEARS_THRESHOLD = 2;
+// 제안서 「단계적 추진 전략 — 1차(단기·우선 적용)」 기준:
+//   '업력 6개월 이상 + 카드매출 발생' 사업자를 자동해제 대상으로 한다.
+const BUSINESS_YEARS_THRESHOLD = 0.5;
 
 function calcBusinessYears(registrationDate) {
   if (!registrationDate) return 0;
@@ -241,12 +211,14 @@ function calcBusinessYears(registrationDate) {
 // 가맹점 본질 판정: FDS + 업력
 //
 // [80점 이상 판정 흐름]
-//   FDS 이상거래 감지 → 무조건 PENDING
-//   FDS 정상(STEADY+DIVERSE) OR 업력 2년+ → APPROVED (서류 0건)
-//   FDS 정상·업력 모두 미충족 → PENDING (신설 사업자 서류 2종)
+//   FDS 이상거래 감지(anomalyFlag) 또는 가장매출 패턴 2건 이상(riskAlert) → 무조건 PENDING
+//   FDS 정상(24/40점 이상) OR 업력 6개월+ → APPROVED (서류 0건)
+//   FDS 정상·업력 모두 미충족 → PENDING (신설 사업자 서류)
 //   FDS 데이터 없음 + 80점 미달 → 일반 PENDING/REJECTED
-function getVerdict(totalScore, { ntsResult, salesResult } = {}) {
-  if (salesResult?.anomalyFlag) {
+const FDS_NORMAL_THRESHOLD = 24; // 40점의 60% — 카드매출 검증 통과 기준
+
+function getVerdict(totalScore, { ntsResult, salesResult, salesScore } = {}) {
+  if (salesResult?.anomalyFlag || salesScore?.riskAlert) {
     return {
       verdict: 'PENDING',
       label: '카드매출 패턴 확인 필요',
@@ -259,12 +231,12 @@ function getVerdict(totalScore, { ntsResult, salesResult } = {}) {
     const businessYears = calcBusinessYears(ntsResult?.registrationDate);
     const isEstablished = businessYears >= BUSINESS_YEARS_THRESHOLD;
     const fdsNormal = salesResult?.hasData && !salesResult?.anomalyFlag &&
-                      salesResult?.salesPattern === 'STEADY' && salesResult?.customerDiversity === 'DIVERSE';
+                      (salesScore?.score || 0) >= FDS_NORMAL_THRESHOLD;
 
     if (fdsNormal || isEstablished) {
       // FDS 정상 또는 업력 충족 → 즉시 해제, 서류 0건 (총점 80+가 보강)
       const reasons = [];
-      if (fdsNormal) reasons.push('카드매출 FDS 정상');
+      if (fdsNormal) reasons.push(`카드매출 FDS ${salesScore.score}/40점`);
       if (isEstablished) reasons.push(`업력 ${businessYears.toFixed(1)}년`);
       return {
         verdict: 'APPROVED',
@@ -323,6 +295,7 @@ function calculateTrustScore(allResults) {
     verdict: getVerdict(totalScore, {
       ntsResult: nts,
       salesResult: sales,
+      salesScore,
     }),
     breakdown: [
       { step: 1, name: '기본 검증',     icon: '🏛️', source: '국세청',                  maxScore: 20, dataSource: nts?.dataSource      || 'MOCK', ...ntsScore },
