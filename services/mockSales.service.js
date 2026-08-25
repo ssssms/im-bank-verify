@@ -71,7 +71,13 @@ const DEMO_SERIES = {
   },
 };
 
-const NO_SALES = { hasData: false, dataType: 'NONE', recentMonths: 0, avgMonthlySales: 0, etaxCount: 0, monthly: [], industryAvgSales: 0, repeatedAmountRatio: 0, salesPattern: null, customerDiversity: null, industryAvgRatio: null, anomalyFlag: false };
+// ── 매출 없음 두 종류 (2026-08-25 분리) ───────────────────────
+//   merchantRegistered = 카드 가맹점으로 등록되어 있는가 (BC 배치 수록 여부에 대응)
+//   · NOT_REGISTERED      : 배치에 사업자번호 자체가 없음 → 카드 미가맹(B2B 도소매·용역 등) 또는 진짜 신규
+//   · REGISTERED_NO_SALES : 가맹점 등록은 되어 있으나 6개월 매출 0 → 가맹만 하고 영업하지 않음(의심)
+//   기존에는 둘 다 hasData:false 하나로 뭉쳐 동일하게 0점 처리했다.
+const NO_SALES = { hasData: false, merchantRegistered: false, dataType: 'NOT_REGISTERED', recentMonths: 0, avgMonthlySales: 0, etaxCount: 0, monthly: [], industryAvgSales: 0, repeatedAmountRatio: 0, salesPattern: null, customerDiversity: null, industryAvgRatio: null, anomalyFlag: false };
+const REGISTERED_NO_SALES = { ...NO_SALES, merchantRegistered: true, dataType: 'REGISTERED_NO_SALES' };
 
 // ── 최근 6개월 라벨(YYYY-MM) 생성 ─────────────────────────────
 function recentYearMonths(count = 6) {
@@ -117,8 +123,12 @@ function mulberry32(seed) {
 function generateSeededSales(businessNumber) {
   const rnd = mulberry32(seedFrom(businessNumber));
 
-  // 약 8%는 카드 가맹점 미등록(신설·현금영수증 전용 등)
-  if (rnd() < 0.08) return { ...NO_SALES };
+  // 약 8%는 카드매출 없음 — 원인이 둘이라 분리한다
+  //   6% 카드 가맹점 미등록(B2B 도소매·용역·현금영수증 전용 등)
+  //   2% 가맹점 등록은 했으나 6개월 매출 0 (가맹만 하고 영업 안 함 — 의심 케이스)
+  const noSalesRoll = rnd();
+  if (noSalesRoll < 0.06) return { ...NO_SALES };
+  if (noSalesRoll < 0.08) return { ...REGISTERED_NO_SALES };
 
   const r = rnd();
   const activeMonths = r < 0.45 ? 6 : r < 0.7 ? 5 : r < 0.88 ? 4 : 3;
@@ -147,6 +157,7 @@ function generateSeededSales(businessNumber) {
 
   return {
     hasData: true,
+    merchantRegistered: true,
     dataType: rnd() < 0.4 ? 'CARD_AND_ETAX' : 'CARD_ONLY',
     recentMonths: 6,
     etaxCount: Math.floor(rnd() * 20),
@@ -162,6 +173,7 @@ function getMockSalesData(businessNumber) {
   if (demo) {
     return {
       hasData: true,
+      merchantRegistered: true,
       dataType: demo.dataType,
       recentMonths: demo.rows.length,
       etaxCount: demo.etaxCount,

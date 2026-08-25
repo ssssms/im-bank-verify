@@ -265,7 +265,7 @@ router.get('/stream', async (req, res) => {
     // ── Step 4: 카드 FDS ──────────────────────────────────────
     send(4, { status: 'loading', message: 'BC카드 매출 패턴 분석 중 (가맹점 본질 검증)...' });
     const salesResult = await getSalesData(cleanBizNum, name);
-    const salesScore  = calcStepScore(4, salesResult);
+    const salesScore  = calcStepScore(4, salesResult, ntsResult); // ntsResult = 무데이터 3분해용
     send(4, {
       status: salesResult.hasData ? 'success' : 'warning',
       result: salesResult,

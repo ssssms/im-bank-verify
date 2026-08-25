@@ -31,6 +31,7 @@
  */
 
 const { scoreFds } = require('./fdsEngine');
+const { evaluateGate } = require('./negativeGate');
 
 const SCORE_THRESHOLDS = { APPROVED: 80, PENDING: 50 };
 
@@ -111,9 +112,38 @@ function calcLicenseScore(licenseResult) {
 //
 //   0점 : hasData=false (가맹점 미등록·신설) 또는 anomalyFlag=true (이상거래 확정)
 //   ④ 감점 4점 이상(패턴 2건 이상) → riskAlert=true → 점수 무관 PENDING 강제
-function calcSalesScore(salesResult) {
+// ── 무데이터 3분해 (2026-08-25 신설) ──────────────────────────
+// 종전에는 hasData=false 를 전부 '가맹점 미운영 또는 신설' 한 줄로 뭉쳐 똑같이 0점 처리했다.
+// 원인이 셋이고 위험도가 정반대라 구분한다.
+//   A. 카드 미가맹    : 가맹점 등록 자체가 없음 + 개업 1년 초과 → B2B 도소매·용역 등.
+//                       불리하게 볼 사유가 아니므로 REJECTED 하한을 완화한다(getVerdict).
+//   B. 가맹 후 무실적 : 가맹점 등록은 되어 있으나 6개월 매출 0 → 가장 의심. 게이트 HOLD.
+//   C. 진짜 신규      : 개업 1년 이내 → 데이터 부족이지 위험신호가 아니다. 현행 신설 경로.
+const NEW_BUSINESS_MONTHS = 12; // 개업 후 카드 가맹·매출 적재까지의 유예
+
+function resolveNoDataCase(salesResult, ntsResult) {
+  if (!salesResult || salesResult.hasData) return null;
+  if (salesResult.merchantRegistered) return 'B';
+  const months = calcBusinessYears(ntsResult?.registrationDate) * 12;
+  return months <= NEW_BUSINESS_MONTHS ? 'C' : 'A';
+}
+
+const NO_DATA_DETAIL = {
+  A: '카드 가맹점 미등록 — 카드 결제를 받지 않는 업종으로 추정 (매출 증빙 서류로 대체 확인)',
+  B: '카드 가맹점 등록 확인 · 최근 6개월 카드매출 없음 — 추가 확인 필요',
+  C: '신규 개업 — 카드매출 이력이 쌓이기 전 단계',
+};
+
+function calcSalesScore(salesResult, ntsResult) {
+  const noDataCase = resolveNoDataCase(salesResult, ntsResult);
   if (!salesResult || !salesResult.hasData) {
-    return { score: 0, detail: '카드매출 데이터 없음 (가맹점 미운영 또는 신설)', passed: false, subScores: [] };
+    return {
+      score: 0,
+      detail: NO_DATA_DETAIL[noDataCase] || '카드매출 데이터 없음',
+      passed: false,
+      subScores: [],
+      noDataCase,
+    };
   }
   if (salesResult.anomalyFlag) {
     return {
@@ -217,8 +247,31 @@ function calcBusinessYears(registrationDate) {
 //   FDS 데이터 없음 + 80점 미달 → 일반 PENDING/REJECTED
 const FDS_NORMAL_THRESHOLD = 24; // 40점의 60% — 카드매출 검증 통과 기준
 
-function getVerdict(totalScore, { ntsResult, salesResult, salesScore } = {}) {
-  if (salesResult?.anomalyFlag || salesScore?.riskAlert) {
+function getVerdict(totalScore, { ntsResult, salesResult, salesScore, gate } = {}) {
+  // ── 네거티브 게이트 우선 (점수 무관 오버라이드) ──────────────
+  // 위험 신호는 가점 체계에 섞지 않고 판정 단계에서 차단한다. 배점은 1점도 바뀌지 않는다.
+  if (gate?.override === 'REJECTED') {
+    return {
+      verdict: 'REJECTED',
+      label: '비대면 해제 불가',
+      description: `위험 신호가 확인되었습니다 — ${gate.summary}. 가까운 iM Bank 영업점을 방문해 주세요.`,
+      color: '#FF4D4F',
+      gateLevel: gate.level,
+      gateReasons: gate.reasons,
+    };
+  }
+  if (gate?.override === 'PENDING') {
+    return {
+      verdict: 'PENDING',
+      label: '추가 확인 필요',
+      description: `${gate.summary} — 추가 확인이 필요합니다.`,
+      color: '#FFB800',
+      gateLevel: gate.level,
+      gateReasons: gate.reasons,
+    };
+  }
+  // 게이트 미평가 경로(단독 호출) 대비 — 종전 동작 보존
+  if (!gate && (salesResult?.anomalyFlag || salesScore?.riskAlert)) {
     return {
       verdict: 'PENDING',
       label: '카드매출 패턴 확인 필요',
@@ -260,6 +313,18 @@ function getVerdict(totalScore, { ntsResult, salesResult, salesScore } = {}) {
       color: '#FFB800',
     };
   } else {
+    // 카드 미가맹(A) + 국세청 정상 → REJECTED 대신 PENDING 으로 완화.
+    // 카드 결제를 받지 않는 정상 업종(B2B 도소매·용역 등)이 FDS 0점 때문에
+    // 영업점 방문으로 밀려나던 구조를 바로잡는다. 실존 사업자 확인(국세청 정상)이 전제.
+    if (salesScore?.noDataCase === 'A' && ntsResult?.businessStatus === 'ACTIVE') {
+      return {
+        verdict: 'PENDING',
+        label: '추가 서류 필요',
+        description: '카드 결제를 받지 않는 업종으로 확인됩니다. 카드매출 대신 매출 증빙 서류를 제출하면 비대면으로 한도 해제가 가능합니다.',
+        color: '#FFB800',
+        relaxedFrom: 'REJECTED',
+      };
+    }
     return {
       verdict: 'REJECTED',
       label: '비대면 해제 불가',
@@ -279,7 +344,7 @@ function calculateTrustScore(allResults) {
   const ntsScore      = calcNtsScore(nts);
   const locationScore = calcLocationScore(location, license);
   const licenseScore  = calcLicenseScore(license);
-  const salesScore    = calcSalesScore(sales);
+  const salesScore    = calcSalesScore(sales, nts);
 
   const totalScore =
     ntsScore.score + locationScore.score + licenseScore.score +
@@ -287,15 +352,20 @@ function calculateTrustScore(allResults) {
 
   const businessYears = calcBusinessYears(nts?.registrationDate);
 
+  // 네거티브 게이트 — 점수와 독립된 차단 레이어
+  const gate = evaluateGate({ sales, salesScore, noDataCase: salesScore.noDataCase });
+
   return {
     totalScore,
     maxScore: 100,
     percentage: totalScore,
     businessYears: businessYears > 0 ? parseFloat(businessYears.toFixed(1)) : null,
+    gate,
     verdict: getVerdict(totalScore, {
       ntsResult: nts,
       salesResult: sales,
       salesScore,
+      gate,
     }),
     breakdown: [
       { step: 1, name: '기본 검증',     icon: '🏛️', source: '국세청',                  maxScore: 20, dataSource: nts?.dataSource      || 'MOCK', ...ntsScore },
@@ -315,7 +385,7 @@ function calcStepScore(stepNumber, result, extraResult) {
     case 1: return calcNtsScore(result);
     case 2: return calcLocationScore(result, extraResult); // extraResult = licenseResult
     case 3: return calcLicenseScore(result);
-    case 4: return calcSalesScore(result);
+    case 4: return calcSalesScore(result, extraResult); // extraResult = ntsResult (무데이터 3분해용)
     default: return { score: 0, detail: '', passed: false };
   }
 }
