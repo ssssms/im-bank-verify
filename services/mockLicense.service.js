@@ -18,7 +18,7 @@
 const axios = require('axios');
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222']);
+const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
 
 // ── 인허가 업종 서비스 코드 ────────────────────────────────────
 const LICENSE_SERVICE_CODES = [
@@ -64,6 +64,16 @@ const MOCK_LICENSE_DATA = {
     expiryDate: null,
     address: '대구광역시 수성구 동대구로 100',
     detail: '일반음식점 영업허가 유효 (2025.09 취득) — 새로운분식',
+  },
+  // 시나리오 E: 가장매출 의심 — 인허가는 정상(매장 실재), 카드 흐름만 이상
+  '5555555555': {
+    hasLicense: true,
+    licenseType: '휴게음식점',
+    licenseStatus: '영업',
+    licenseDate: '2025-01-20',
+    expiryDate: null,
+    address: '부산광역시 해운대구 해운대해변로 200',
+    detail: '식품위생법 휴게음식점 영업신고 유효 (2025.01 취득) — 스마일카페',
   },
   // 시나리오 D: 폐업으로 허가 취소
   '1111111111': {

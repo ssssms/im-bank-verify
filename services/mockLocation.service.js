@@ -17,7 +17,7 @@
 const axios = require('axios');
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222']);
+const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
 
 // ── Mock 데이터 ────────────────────────────────────────────────
 const MOCK_LOCATION_DATA = {
@@ -25,6 +25,8 @@ const MOCK_LOCATION_DATA = {
   '9876543210': { matched: true,  confidence: 'MEDIUM', address: '경기도 성남시 분당구 판교로 45',  latitude: 37.3947, longitude: 127.1112, matchedStoreName: '행복마트',       step1: true, step2: false },
   '2222222222': { matched: true,  confidence: 'HIGH',   address: '대구광역시 수성구 동대구로 100', latitude: 35.8562, longitude: 128.6327, matchedStoreName: '새로운분식', step1: true, step2: true },
   '1111111111': { matched: false, confidence: 'NONE',   address: null, latitude: null, longitude: null, matchedStoreName: null, step1: false, step2: false },
+  // 시나리오 E: 가장매출 의심 — 매장은 실재(위치·인허가 만점), 카드 흐름만 이상
+  '5555555555': { matched: true,  confidence: 'HIGH',   address: '부산광역시 해운대구 해운대해변로 200', latitude: 35.1587, longitude: 129.1604, matchedStoreName: '스마일카페', step1: true, step2: true },
 };
 
 // ── 1차: 네이버 지역 검색 (한국 사업장 DB, 이름 변형 처리 우수) ──
