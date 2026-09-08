@@ -5,7 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "demo:test": "node test/demo.test.js",
+    "test:eligibility": "node test/eligibility.test.js",
+    "admin:test": "node test/admin.test.js",
+    "test": "node test/eligibility.test.js && node test/demo.test.js && node test/admin.test.js",
+    "demo:sse": "node test/sse.log.js"
   },
   "dependencies": {
     "axios": "^1.6.7",

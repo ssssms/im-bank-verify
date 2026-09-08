@@ -23,17 +23,19 @@
  *   - 건축물대장 (10점): 위치 검증과 중복 (services/mockBuilding.service.js deprecated)
  *   - 국민연금 (10점): 1인 가맹점 사업자 차별 (services/mockPension.service.js deprecated)
  *
- * [판정 기준]
- *   - APPROVED (승인): 80점 이상 + (FDS 24점+ OR 업력 6개월+) → 한도제한계좌 즉시 해제
- *   - PENDING  (보류): 50~79점 또는 신설(FDS 미정상+업력 부족) → 추가 서류 제출
- *   - REJECTED (거절): 49점 이하 → 영업점 방문
- *   - FDS 이상거래 감지: 점수 무관 PENDING
+ * [판정 기준 — 4종, 2026-09-08] 기준값은 전부 utils/rules.config.js
+ *   ① 국세청 비정상(휴·폐업)        → REJECTED
+ *   ② 게이트 BLOCK                  → REJECTED
+ *   ③ 판단 자격 미충족(eligibility) → INELIGIBLE (카드매출 6개월 이력 없음 → 현행 절차)
+ *   ④ 게이트 HOLD                   → PENDING
+ *   ⑤ 총점 80+ → APPROVED / 50~79 → PENDING / 49 이하 → REJECTED
  */
 
+const { getRules } = require('./rules.config'); // 상수 캐시 금지 — 각 함수가 매 계산마다 getRules() 를 읽는다
 const { scoreFds } = require('./fdsEngine');
 const { evaluateGate } = require('./negativeGate');
-
-const SCORE_THRESHOLDS = { APPROVED: 80, PENDING: 50 };
+const { calcBusinessYears } = require('./businessAge');
+const { checkEligibility } = require('./eligibility');
 
 // ── 1단계: 국세청 기본 검증 (20점) ────────────────────────────
 function calcNtsScore(ntsResult) {
@@ -116,25 +118,26 @@ function calcLicenseScore(licenseResult) {
 // 종전에는 hasData=false 를 전부 '가맹점 미운영 또는 신설' 한 줄로 뭉쳐 똑같이 0점 처리했다.
 // 원인이 셋이고 위험도가 정반대라 구분한다.
 //   A. 카드 미가맹    : 가맹점 등록 자체가 없음 + 개업 1년 초과 → B2B 도소매·용역 등.
-//                       불리하게 볼 사유가 아니므로 REJECTED 하한을 완화한다(getVerdict).
 //   B. 가맹 후 무실적 : 가맹점 등록은 되어 있으나 6개월 매출 0 → 가장 의심. 게이트 HOLD.
-//   C. 진짜 신규      : 개업 1년 이내 → 데이터 부족이지 위험신호가 아니다. 현행 신설 경로.
-const NEW_BUSINESS_MONTHS = 12; // 개업 후 카드 가맹·매출 적재까지의 유예
+//   C. 진짜 신규      : 개업 1년 이내 → 데이터 부족이지 위험신호가 아니다.
+//   ※ 2026-09-08 부터 세 경우 모두 판단 자격 미충족(INELIGIBLE) → 현행 절차. noDataCase 는 detail 문구용.
 
 function resolveNoDataCase(salesResult, ntsResult) {
+  const RULES = getRules();
   if (!salesResult || salesResult.hasData) return null;
   if (salesResult.merchantRegistered) return 'B';
   const months = calcBusinessYears(ntsResult?.registrationDate) * 12;
-  return months <= NEW_BUSINESS_MONTHS ? 'C' : 'A';
+  return months <= RULES.NO_DATA_NEW_BUSINESS_MONTHS ? 'C' : 'A';
 }
 
 const NO_DATA_DETAIL = {
-  A: '카드 가맹점 미등록 — 카드 결제를 받지 않는 업종으로 추정 (매출 증빙 서류로 대체 확인)',
+  A: '카드 가맹점 미등록 — 카드 결제를 받지 않는 업종으로 추정',
   B: '카드 가맹점 등록 확인 · 최근 6개월 카드매출 없음 — 추가 확인 필요',
   C: '신규 개업 — 카드매출 이력이 쌓이기 전 단계',
 };
 
 function calcSalesScore(salesResult, ntsResult) {
+  const RULES = getRules();
   const noDataCase = resolveNoDataCase(salesResult, ntsResult);
   if (!salesResult || !salesResult.hasData) {
     return {
@@ -167,7 +170,7 @@ function calcSalesScore(salesResult, ntsResult) {
   return {
     score: fds.score,
     detail: `${etaxNote} 분석 (${fds.summary}${patternNote})`,
-    passed: fds.score >= 20,
+    passed: fds.score >= RULES.FDS.PASS_SCORE,
     riskAlert: fds.riskAlert,
     subScores: fds.subScores,
     metrics: fds.metrics,
@@ -224,114 +227,238 @@ function calcHometaxScore(hometaxResult) {
   return { score: 0, detail: hometaxResult.detail || '홈택스 신고 이력 없음', passed: false };
 }
 
-// ── 업력 산출 (연 단위) — APPROVED 분기 판정용 ────────────────
+// ── 업력 산출 (연 단위) — utils/businessAge.js 공용 (eligibility 와 같은 함수) ──
 // 제안서 「단계적 추진 전략 — 1차(단기·우선 적용)」 기준:
 //   '업력 6개월 이상 + 카드매출 발생' 사업자를 자동해제 대상으로 한다.
-const BUSINESS_YEARS_THRESHOLD = 0.5;
+//   → 2026-09-08 부터 판단 자격(eligibility)으로 승격. 기준값은 rules.config.js
 
-function calcBusinessYears(registrationDate) {
-  if (!registrationDate) return 0;
-  const regDate = new Date(registrationDate);
-  if (isNaN(regDate.getTime())) return 0;
-  const now = new Date();
-  return (now - regDate) / (365.25 * 24 * 60 * 60 * 1000);
+// ── 판정 (4종) ───────────────────────────────────────────────
+// [판정 순서 — 2026-09-08 확정]
+//   ① 국세청 비정상(휴·폐업)        → REJECTED
+//   ② 게이트 BLOCK                  → REJECTED (점수 무관)
+//   ③ 판단 자격 미충족(eligibility) → INELIGIBLE (카드매출 6개월 이력 없음 → 현행 절차)
+//   ④ 게이트 HOLD                   → PENDING  (점수 무관)
+//   ⑤ 총점 ≥ APPROVED_CUT → APPROVED / ≥ PENDING_CUT → PENDING / 그 외 → REJECTED
+//
+// 삭제된 분기(둘 다 INELIGIBLE 로 흡수):
+//   - 「카드 미가맹(noDataCase A) → 매출 증빙 서류로 대체 PENDING」 완화
+//   - 「80점 이상이지만 신설이라 실사 서류 PENDING」
+//   noDataCase 는 4단계 detail 문구용으로만 남는다.
+//
+// [nextStep] 판정별 다음 절차. 프론트 NextStep 패널이 그대로 그린다.
+//   AUTO_RELEASE           승인 — 즉시 해제, 서류 없음
+//   REMOTE_REVIEW          보류 — 본부 담당자 원격 확인 + 잃은 점수 기준 맞춤 보완 + 1개월 후 자동 재검증
+//   BRANCH_INSPECTION      거절 — 서류로 바뀌지 않음, 영업점 현장 확인(실사)만 가능
+//   BRANCH_CURRENT_PROCESS 판단 불가 — 현행 절차(영업점 서류 심사) 안내 + 카드매출 6개월 후 자동 재검증
+
+const VERDICT_UI = {
+  APPROVED:   { label: '한도 해제 승인',          color: '#00C3A5' },
+  PENDING:    { label: '보류 · 본부 원격 확인',   color: '#FFB800' },
+  REJECTED:   { label: '비대면 해제 불가',        color: '#FF4D4F' },
+  INELIGIBLE: { label: '판단 불가 · 영업점 안내', color: '#5B7A99' },
+};
+
+// 현행 절차(영업점 서류 심사) 서류 — INELIGIBLE 에만 붙는다
+const CURRENT_PROCESS_DOCS = [
+  '사업자등록증 원본',
+  '대표자 신분증',
+  '사업장 임대차계약서',
+  '부가가치세 과세표준증명원 또는 납세증명서',
+  '(전자)세금계산서 또는 매출 증빙 자료',
+];
+
+const HUMAN_REVIEW = '본부 담당자 확인(추가 서류로 대체 불가)';
+
+// 보류 시 잃은 점수 단계별 맞춤 보완 — 등록 서류(사업자등록증·부가세 증명)는 넣지 않는다
+function buildRemedies({ locationScore, licenseScore, salesScore, gate }) {
+  const RULES = getRules();
+  const remedies = [];
+  const sub = key => (salesScore?.subScores || []).find(s => s.key === key);
+
+  if (!locationScore?.passed) {
+    remedies.push({ cause: '사업장 위치 미확인', evidence: '임대차계약서 또는 간판·매장 사진' });
+  } else if (locationScore.score < 20) {
+    remedies.push({ cause: '사업장 위치 교차검증 미완료 (단일 소스만 확인)', evidence: '임대차계약서 또는 간판·매장 사진' });
+  }
+  if (!licenseScore?.passed) {
+    remedies.push({ cause: '영업 인허가 미확인', evidence: '영업신고증(허가증)' });
+  }
+
+  const volume = sub('volume');
+  if (volume && volume.score < RULES.REMEDY.VOLUME_WEAK_BELOW) {
+    remedies.push({
+      cause: `카드매출 규모·건수 약함 (${volume.score}/${volume.max}점 · ${volume.detail})`,
+      evidence: '세금계산서 발행내역 또는 POS 단말기 설치 확인서(KICC)',
+    });
+  }
+
+  const customer = sub('customer');
+  const anomaly  = sub('anomaly');
+  const causes = [];
+  if (customer && customer.score < RULES.REMEDY.CUSTOMER_WEAK_BELOW) {
+    causes.push(`순고객 분산 낮음 (${customer.score}/${customer.max}점 · ${customer.detail})`);
+  }
+  if (anomaly && (anomaly.flags || []).length >= 1) {
+    causes.push(`이상패턴 ${anomaly.flags.length}건 (${anomaly.flags.join(' / ')})`);
+  }
+  if (causes.length) remedies.push({ cause: causes.join(' · '), evidence: HUMAN_REVIEW });
+
+  if (gate?.level === 'HOLD') {
+    remedies.push({ cause: `위험 신호 보류 — ${gate.summary}`, evidence: HUMAN_REVIEW });
+  }
+  return remedies;
 }
 
-// ── 판정 ─────────────────────────────────────────────────────
-// 가맹점 본질 판정: FDS + 업력
-//
-// [80점 이상 판정 흐름]
-//   FDS 이상거래 감지(anomalyFlag) 또는 가장매출 패턴 2건 이상(riskAlert) → 무조건 PENDING
-//   FDS 정상(24/40점 이상) OR 업력 6개월+ → APPROVED (서류 0건)
-//   FDS 정상·업력 모두 미충족 → PENDING (신설 사업자 서류)
-//   FDS 데이터 없음 + 80점 미달 → 일반 PENDING/REJECTED
-const FDS_NORMAL_THRESHOLD = 24; // 40점의 60% — 카드매출 검증 통과 기준
+function nextStepApproved() {
+  return {
+    type: 'AUTO_RELEASE',
+    title: '즉시 해제',
+    lines: [
+      '한도제한계좌가 즉시 해제됩니다. 추가 제출 서류 없음.',
+      '해제 완료 시 등록된 연락처로 SMS 알림이 발송됩니다.',
+    ],
+    remedies: [], docs: [], reverifyAvailable: false,
+  };
+}
 
-function getVerdict(totalScore, { ntsResult, salesResult, salesScore, gate } = {}) {
-  // ── 네거티브 게이트 우선 (점수 무관 오버라이드) ──────────────
-  // 위험 신호는 가점 체계에 섞지 않고 판정 단계에서 차단한다. 배점은 1점도 바뀌지 않는다.
-  if (gate?.override === 'REJECTED') {
+function nextStepPending(ctx) {
+  const RULES = getRules();
+  return {
+    type: 'REMOTE_REVIEW',
+    title: '본부 원격 확인',
+    lines: [
+      '데이터만으로 확정할 수 없어 본부 담당자가 원격으로 확인합니다.',
+      '사업자등록증·부가가치세 증명 등 등록 서류는 요구하지 않습니다.',
+      `${RULES.REVERIFY_AFTER_MONTHS}개월 후 자동 재검증을 예약할 수 있습니다. 카드매출이 개선되면 다음 검증에서 자동 반영됩니다.`,
+    ],
+    remedies: buildRemedies(ctx), docs: [], reverifyAvailable: true,
+  };
+}
+
+function nextStepRejected(kind, gate) {
+  const lock = '이 판정은 서류 제출로 바뀌지 않으며, 영업점 현장 확인(실사) 절차만 가능합니다.';
+  if (kind === 'NTS_INACTIVE') {
     return {
-      verdict: 'REJECTED',
-      label: '비대면 해제 불가',
-      description: `위험 신호가 확인되었습니다 — ${gate.summary}. 가까운 iM Bank 영업점을 방문해 주세요.`,
-      color: '#FF4D4F',
+      type: 'BRANCH_INSPECTION', reasonCode: kind,
+      title: '해제 대상 아님',
+      lines: [
+        '국세청 사업자등록 상태가 휴업 또는 폐업으로 확인되어 한도 해제 대상이 아닙니다.',
+        '실제와 다르다면 사업자등록 정정 후 다시 신청하시거나, 가까운 iM Bank 영업점에 문의해 주세요.',
+      ],
+      remedies: [], docs: [], reverifyAvailable: false,
+    };
+  }
+  if (kind === 'GATE_BLOCK') {
+    return {
+      type: 'BRANCH_INSPECTION', reasonCode: kind,
+      title: '영업점 현장 확인(실사)',
+      lines: [
+        `부정 신호가 확인되어 비대면 해제가 불가합니다. (${gate?.summary || '위험 신호'})`,
+        lock,
+      ],
+      remedies: [], docs: [], reverifyAvailable: false,
+    };
+  }
+  return {
+    type: 'BRANCH_INSPECTION', reasonCode: 'SCORE_BELOW_CUT',
+    title: '영업점 현장 확인(실사)',
+    lines: [
+      '검증 기준 미달 — 영업점 현장 확인(실사) 절차로 안내합니다.',
+      lock,
+    ],
+    remedies: [], docs: [], reverifyAvailable: false,
+  };
+}
+
+function nextStepIneligible(eligibility) {
+  const RULES = getRules();
+  const reasonText = (eligibility?.reasons || []).map(r => r.label).join(' · ') || '카드매출 이력 없음';
+  return {
+    type: 'BRANCH_CURRENT_PROCESS',
+    title: '현행 절차(영업점 서류 심사) 안내',
+    lines: [
+      `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 실영위를 판단할 수 없습니다. (사유: ${reasonText})`,
+      '현행 절차(영업점 서류 심사)로 안내합니다. 아래 서류를 지참하고 가까운 iM Bank 영업점을 방문해 주세요.',
+      `카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓이면 자동 재검증할 수 있습니다.`,
+    ],
+    remedies: [], docs: CURRENT_PROCESS_DOCS.slice(), reverifyAvailable: true,
+  };
+}
+
+function withUi(verdict, extra) {
+  return { verdict, ...VERDICT_UI[verdict], ...extra };
+}
+
+function getVerdict(totalScore, {
+  ntsResult, salesResult, salesScore, gate, locationScore, licenseScore, eligibility,
+} = {}) {
+  const RULES = getRules();
+  const remedyCtx = { locationScore, licenseScore, salesScore, gate };
+
+  // ① 국세청 비정상(휴·폐업·미등록) — 서류로 해결되는 문제가 아니다
+  if (!ntsResult || ntsResult.businessStatus !== 'ACTIVE') {
+    const status = ntsResult?.businessStatus === 'SUSPENDED' ? '휴업'
+                 : ntsResult?.businessStatus === 'CLOSED'    ? '폐업'
+                 : '미등록 또는 확인 불가';
+    return withUi('REJECTED', {
+      description: `국세청 사업자 상태가 ${status}으로 확인되어 한도 해제 대상이 아닙니다.`,
+      nextStep: nextStepRejected('NTS_INACTIVE'),
+    });
+  }
+
+  // ② 네거티브 게이트 BLOCK — 점수 무관 차단
+  if (gate?.level === 'BLOCK') {
+    return withUi('REJECTED', {
+      description: `위험 신호가 확인되었습니다 — ${gate.summary}. 비대면 해제가 불가합니다.`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
-    };
+      nextStep: nextStepRejected('GATE_BLOCK', gate),
+    });
   }
-  if (gate?.override === 'PENDING') {
-    return {
-      verdict: 'PENDING',
-      label: '추가 확인 필요',
-      description: `${gate.summary} — 추가 확인이 필요합니다.`,
-      color: '#FFB800',
+
+  // ③ 판단 자격 미충족 — 카드매출 6개월 이력이 없어 실영위를 판단할 수 없다
+  const elig = eligibility || checkEligibility({ nts: ntsResult, sales: salesResult });
+  if (!elig.eligible) {
+    return withUi('INELIGIBLE', {
+      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 실영위를 판단할 수 없습니다. 현행 절차(영업점 서류 심사)로 안내합니다.`,
+      reasons: elig.reasons,
+      businessMonths: elig.businessMonths,
+      salesMonths: elig.salesMonths,
+      nextStep: nextStepIneligible(elig),
+    });
+  }
+
+  // ④ 네거티브 게이트 HOLD — 점수 무관 보류 (사람이 봐야 하는 신호)
+  if (gate?.level === 'HOLD') {
+    return withUi('PENDING', {
+      description: `${gate.summary} — 본부 담당자가 확인합니다.`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
-    };
-  }
-  // 게이트 미평가 경로(단독 호출) 대비 — 종전 동작 보존
-  if (!gate && (salesResult?.anomalyFlag || salesScore?.riskAlert)) {
-    return {
-      verdict: 'PENDING',
-      label: '카드매출 패턴 확인 필요',
-      description: '카드매출 패턴에 이상이 감지되었습니다. 추가 확인이 필요합니다.',
-      color: '#FFB800',
-    };
+      nextStep: nextStepPending(remedyCtx),
+    });
   }
 
-  if (totalScore >= SCORE_THRESHOLDS.APPROVED) {
-    const businessYears = calcBusinessYears(ntsResult?.registrationDate);
-    const isEstablished = businessYears >= BUSINESS_YEARS_THRESHOLD;
-    const fdsNormal = salesResult?.hasData && !salesResult?.anomalyFlag &&
-                      (salesScore?.score || 0) >= FDS_NORMAL_THRESHOLD;
-
-    if (fdsNormal || isEstablished) {
-      // FDS 정상 또는 업력 충족 → 즉시 해제, 서류 0건 (총점 80+가 보강)
-      const reasons = [];
-      if (fdsNormal) reasons.push(`카드매출 FDS ${salesScore.score}/40점`);
-      if (isEstablished) reasons.push(`업력 ${businessYears.toFixed(1)}년`);
-      return {
-        verdict: 'APPROVED',
-        label: '한도 해제 승인',
-        description: `정상 운영 가맹점으로 확인되었습니다. 한도제한계좌가 즉시 해제됩니다. (${reasons.join(' · ')})`,
-        color: '#00C3A5',
-      };
-    } else {
-      return {
-        verdict: 'PENDING',
-        label: '추가 서류 필요',
-        description: '점수 기준은 통과했으나, 신설 사업자로 분류되어 실사 서류가 필요합니다.',
-        color: '#FFB800',
-      };
-    }
-  } else if (totalScore >= SCORE_THRESHOLDS.PENDING) {
-    return {
-      verdict: 'PENDING',
-      label: '추가 서류 필요',
-      description: '일부 검증을 통과하지 못했습니다. 추가 서류를 제출하면 한도 해제가 가능합니다.',
-      color: '#FFB800',
-    };
-  } else {
-    // 카드 미가맹(A) + 국세청 정상 → REJECTED 대신 PENDING 으로 완화.
-    // 카드 결제를 받지 않는 정상 업종(B2B 도소매·용역 등)이 FDS 0점 때문에
-    // 영업점 방문으로 밀려나던 구조를 바로잡는다. 실존 사업자 확인(국세청 정상)이 전제.
-    if (salesScore?.noDataCase === 'A' && ntsResult?.businessStatus === 'ACTIVE') {
-      return {
-        verdict: 'PENDING',
-        label: '추가 서류 필요',
-        description: '카드 결제를 받지 않는 업종으로 확인됩니다. 카드매출 대신 매출 증빙 서류를 제출하면 비대면으로 한도 해제가 가능합니다.',
-        color: '#FFB800',
-        relaxedFrom: 'REJECTED',
-      };
-    }
-    return {
-      verdict: 'REJECTED',
-      label: '비대면 해제 불가',
-      description: '검증 기준을 충족하지 못했습니다. 가까운 iM Bank 영업점을 방문해 주세요.',
-      color: '#FF4D4F',
-    };
+  // ⑤ 총점 구간
+  if (totalScore >= RULES.APPROVED_CUT) {
+    const reasons = [];
+    const fdsScore = salesScore?.score || 0;
+    if (fdsScore >= RULES.FDS_NORMAL_THRESHOLD) reasons.push(`카드매출 FDS ${fdsScore}/40점`);
+    if (elig.businessMonths != null) reasons.push(`업력 ${(elig.businessMonths / 12).toFixed(1)}년`);
+    return withUi('APPROVED', {
+      description: `정상 운영 가맹점으로 확인되었습니다. 한도제한계좌가 즉시 해제됩니다.${reasons.length ? ` (${reasons.join(' · ')})` : ''}`,
+      nextStep: nextStepApproved(),
+    });
   }
+  if (totalScore >= RULES.PENDING_CUT) {
+    return withUi('PENDING', {
+      description: `총점 ${totalScore}점 — 데이터만으로 확정할 수 없어 본부 담당자가 원격으로 확인합니다.`,
+      nextStep: nextStepPending(remedyCtx),
+    });
+  }
+  return withUi('REJECTED', {
+    description: '검증 기준을 충족하지 못했습니다. 비대면 해제가 불가합니다.',
+    nextStep: nextStepRejected('SCORE_BELOW_CUT'),
+  });
 }
 
 /**
@@ -355,17 +482,24 @@ function calculateTrustScore(allResults) {
   // 네거티브 게이트 — 점수와 독립된 차단 레이어
   const gate = evaluateGate({ sales, salesScore, noDataCase: salesScore.noDataCase });
 
+  // 판단 자격 — 카드매출 6개월 이력 (점수와 독립)
+  const eligibility = checkEligibility({ nts, sales });
+
   return {
     totalScore,
     maxScore: 100,
     percentage: totalScore,
     businessYears: businessYears > 0 ? parseFloat(businessYears.toFixed(1)) : null,
     gate,
+    eligibility,
     verdict: getVerdict(totalScore, {
       ntsResult: nts,
       salesResult: sales,
       salesScore,
       gate,
+      locationScore,
+      licenseScore,
+      eligibility,
     }),
     breakdown: [
       { step: 1, name: '기본 검증',     icon: '🏛️', source: '국세청',                  maxScore: 20, dataSource: nts?.dataSource      || 'MOCK', ...ntsScore },
@@ -390,4 +524,4 @@ function calcStepScore(stepNumber, result, extraResult) {
   }
 }
 
-module.exports = { calculateTrustScore, calcStepScore };
+module.exports = { calculateTrustScore, calcStepScore, calcBusinessYears, getVerdict };

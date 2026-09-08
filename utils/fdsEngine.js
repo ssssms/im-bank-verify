@@ -23,7 +23,12 @@
  *   - 순고객수(중복 제외)는 조작 비용이 가장 높은 지표 → 15점으로 최고 배점
  *   - 일단위 수신 시 activeDays/급증 탐지가, 월단위 수신 시 추세 분석이 작동하도록
  *     동일 엔진이 두 주기 모두를 커버 (제안서 「판정 연계」)
+ *   - 모든 임계값은 utils/rules.config.js 의 FDS 블록에서 가져온다 (2026-09-08)
+ *   - 모듈 로드 시 캐시하지 않고 scoreFds() 가 매 계산마다 getRules().FDS 를 읽어 소항목에 넘긴다
+ *     (관리자 패널 런타임 오버라이드 반영 · 같은 룰 + 같은 입력 = 같은 결과)
  */
+
+const { getRules } = require('./rules.config');
 
 // ── 구간 점수 헬퍼: [임계값, 점수] 배열을 위에서부터 탐색 ──────
 function tier(value, table, fallback = 0) {
@@ -81,11 +86,11 @@ function deriveMetrics(sales) {
 }
 
 // ── ① 영업 지속성 (10점) ─────────────────────────────────────
-function scoreContinuity(m) {
+function scoreContinuity(m, R) {
   // 최근 6개월 중 매출 발생 월수 (6개월 연속 시 만점)
-  const monthsPt = tier(m.activeMonths, [[6, 6], [5, 4], [4, 3], [3, 2], [2, 1]]);
+  const monthsPt = tier(m.activeMonths, R.CONTINUITY_MONTHS);
   // 월 매출 발생일수 (15일 이상 만점, 5일 미만 0점)
-  const daysPt = tier(m.avgActiveDays, [[15, 4], [10, 3], [5, 1]]);
+  const daysPt = tier(m.avgActiveDays, R.CONTINUITY_DAYS);
   return {
     key: 'continuity',
     label: '영업 지속성',
@@ -100,15 +105,16 @@ function scoreContinuity(m) {
 }
 
 // ── ② 매출 규모·건수 (10점) ──────────────────────────────────
-function scoreVolume(m) {
+function scoreVolume(m, R) {
   // 최소 임계치: 월 30건 이상이면 만점
-  const txPt = tier(m.avgTxCount, [[30, 5], [15, 3], [5, 1]]);
+  const txPt = tier(m.avgTxCount, R.VOLUME_TX);
   // 업종 평균 대비 정상 범위(70~150%)면 만점, 과대(250%+)는 가장매출 의심으로 감점
+  const I = R.VOLUME_INDUSTRY;
   let ratioPt = 0;
-  if (m.industryRatio >= 0.7 && m.industryRatio <= 1.5) ratioPt = 5;
-  else if (m.industryRatio >= 2.5) ratioPt = 1;
-  else if (m.industryRatio >= 0.4) ratioPt = 3;
-  else if (m.industryRatio >= 0.2) ratioPt = 1;
+  if (m.industryRatio >= I.NORMAL_MIN && m.industryRatio <= I.NORMAL_MAX) ratioPt = I.NORMAL_PT;
+  else if (m.industryRatio >= I.EXCESS)   ratioPt = I.EXCESS_PT;
+  else if (m.industryRatio >= I.LOW)      ratioPt = I.LOW_PT;
+  else if (m.industryRatio >= I.VERY_LOW) ratioPt = I.VERY_LOW_PT;
 
   return {
     key: 'volume',
@@ -124,13 +130,13 @@ function scoreVolume(m) {
 }
 
 // ── ③ 순고객 분산도 (15점 · 최고 배점) ───────────────────────
-function scoreCustomer(m) {
+function scoreCustomer(m, R) {
   // 순고객수 절대 규모 (50명 이상 만점)
-  const countPt = tier(m.avgUniqueCustomers, [[50, 6], [30, 4], [15, 2]]);
+  const countPt = tier(m.avgUniqueCustomers, R.CUSTOMER_COUNT);
   // 순고객수/매출건수 비율 (0.5 이상 정상 — 소수 고객 반복결제 시 비율 급락)
-  const ratioPt = tier(m.customerRatio, [[0.5, 6], [0.35, 4], [0.2, 2]]);
+  const ratioPt = tier(m.customerRatio, R.CUSTOMER_RATIO);
   // 순고객수 추세 (유지·증가)
-  const trendPt = tier(m.customerTrend, [[1.0, 3], [0.85, 2], [0.7, 1]]);
+  const trendPt = tier(m.customerTrend, R.CUSTOMER_TREND);
 
   return {
     key: 'customer',
@@ -147,24 +153,25 @@ function scoreCustomer(m) {
 }
 
 // ── ④ 이상패턴 페널티 (5점, 감점형) ──────────────────────────
-function scoreAnomaly(m) {
+function scoreAnomaly(m, R) {
+  const A = R.ANOMALY;
   const flags = [];
   let penalty = 0;
 
-  if (m.spikeRatio >= 2.5) {
-    penalty += 2;
+  if (m.spikeRatio >= A.SPIKE_RATIO) {
+    penalty += A.PENALTY_PER_FLAG;
     flags.push(`직전 1개월 매출 급증(직전 3개월 평균의 ${m.spikeRatio.toFixed(1)}배)`);
   }
-  if (m.activeMonths > 0 && m.minActiveDays > 0 && m.minActiveDays <= 3) {
-    penalty += 2;
+  if (m.activeMonths > 0 && m.minActiveDays > 0 && m.minActiveDays <= A.MIN_ACTIVE_DAYS) {
+    penalty += A.PENALTY_PER_FLAG;
     flags.push(`특정일 집중 매출(최소 영업일 ${m.minActiveDays}일)`);
   }
-  if (m.repeatedAmountRatio >= 0.4) {
-    penalty += 2;
+  if (m.repeatedAmountRatio >= A.REPEATED_AMOUNT_RATIO) {
+    penalty += A.PENALTY_PER_FLAG;
     flags.push(`동일 금액 반복 결제 비중 ${Math.round(m.repeatedAmountRatio * 100)}%`);
   }
 
-  const score = Math.max(0, 5 - penalty);
+  const score = Math.max(0, A.BASE - penalty);
   return {
     key: 'anomaly',
     label: '이상패턴 페널티',
@@ -175,7 +182,7 @@ function scoreAnomaly(m) {
     detail: flags.length ? `가장매출 의심 패턴 ${flags.length}건 — ${flags.join(' / ')}` : '가장매출 의심 패턴 없음',
     items: flags.length
       ? flags.map(f => ({ name: '탐지', value: f, score: -2, max: 0 }))
-      : [{ name: '이상패턴', value: '미탐지', score: 5, max: 5 }],
+      : [{ name: '이상패턴', value: '미탐지', score: A.BASE, max: A.BASE }],
   };
 }
 
@@ -185,18 +192,19 @@ function scoreAnomaly(m) {
  * @returns {{ score, subScores, metrics, riskAlert, summary }}
  */
 function scoreFds(sales) {
+  const R = getRules().FDS; // 매 계산마다 읽는다
   const metrics = deriveMetrics(sales);
 
-  const continuity = scoreContinuity(metrics);
-  const volume     = scoreVolume(metrics);
-  const customer   = scoreCustomer(metrics);
-  const anomaly    = scoreAnomaly(metrics);
+  const continuity = scoreContinuity(metrics, R);
+  const volume     = scoreVolume(metrics, R);
+  const customer   = scoreCustomer(metrics, R);
+  const anomaly    = scoreAnomaly(metrics, R);
 
   const raw = continuity.score + volume.score + customer.score + anomaly.score;
   const score = Math.max(0, Math.min(40, raw));
 
   // 감점 4점 이상(패턴 2건 이상) = 가장매출 강한 의심 → 점수 무관 PENDING 강제
-  const riskAlert = anomaly.penalty >= 4;
+  const riskAlert = anomaly.penalty >= R.ANOMALY.RISK_ALERT_PENALTY;
 
   return {
     score,

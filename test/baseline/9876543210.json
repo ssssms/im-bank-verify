@@ -1,0 +1,230 @@
+{
+  "success": true,
+  "businessNumber": "987*******",
+  "companyName": "행복마트",
+  "companyNameSource": "NTS",
+  "trustScore": {
+    "totalScore": 52,
+    "maxScore": 100,
+    "percentage": 52,
+    "businessYears": 2.9,
+    "gate": {
+      "level": "WATCH",
+      "override": null,
+      "reasons": [
+        {
+          "code": "salesPattern",
+          "level": "WATCH",
+          "label": "가장매출 의심 패턴 1건",
+          "detail": "동일 금액 반복 결제 비중 45%",
+          "source": "FDS"
+        }
+      ],
+      "summary": "가장매출 의심 패턴 1건"
+    },
+    "verdict": {
+      "verdict": "PENDING",
+      "label": "추가 서류 필요",
+      "description": "일부 검증을 통과하지 못했습니다. 추가 서류를 제출하면 한도 해제가 가능합니다.",
+      "color": "#FFB800"
+    },
+    "breakdown": [
+      {
+        "step": 1,
+        "name": "기본 검증",
+        "icon": "🏛️",
+        "source": "국세청",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "계속사업자 확인 완료 (계속사업자 · 행복마트)",
+        "passed": true
+      },
+      {
+        "step": 2,
+        "name": "사업장 위치",
+        "icon": "📍",
+        "source": "네이버 + 소상공인진흥공단",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 12,
+        "detail": "위치 확인 완료 (단일 소스 · 교차검증 미완료)",
+        "passed": true
+      },
+      {
+        "step": 3,
+        "name": "영업 인허가",
+        "icon": "📋",
+        "source": "행정안전부 지방행정인허가",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 0,
+        "detail": "행정인허가 조회 결과 없음 (신규사업자 또는 인허가 불필요 업종)",
+        "passed": false,
+        "warned": true
+      },
+      {
+        "step": 4,
+        "name": "카드 FDS",
+        "icon": "💳",
+        "source": "BC카드 (민간 API 활성화 예정)",
+        "maxScore": 40,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "카드매출 분석 (최근 6개월 · 월평균 300만원 · 26건 · 순고객 11명 · 꾸준한 매출 · 소수 반복 결제)",
+        "passed": true,
+        "riskAlert": false,
+        "subScores": [
+          {
+            "key": "continuity",
+            "label": "영업 지속성",
+            "max": 10,
+            "score": 6,
+            "detail": "최근 6개월 중 4개월 매출 발생 · 월평균 영업일 12.5일",
+            "items": [
+              {
+                "name": "매출 발생 월수",
+                "value": "4/6개월",
+                "score": 3,
+                "max": 6
+              },
+              {
+                "name": "월 매출 발생일수",
+                "value": "12.5일",
+                "score": 3,
+                "max": 4
+              }
+            ]
+          },
+          {
+            "key": "volume",
+            "label": "매출 규모·건수",
+            "max": 10,
+            "score": 6,
+            "detail": "월평균 26건 · 300만원 (업종 평균 대비 45%)",
+            "items": [
+              {
+                "name": "월평균 매출건수",
+                "value": "26건",
+                "score": 3,
+                "max": 5
+              },
+              {
+                "name": "업종 평균 대비",
+                "value": "45%",
+                "score": 3,
+                "max": 5
+              }
+            ]
+          },
+          {
+            "key": "customer",
+            "label": "순고객 분산도",
+            "max": 15,
+            "score": 5,
+            "detail": "월평균 순고객 11명 · 고객/건수 비율 0.42 · 추세 감소",
+            "items": [
+              {
+                "name": "월 순고객수(중복 제외)",
+                "value": "11명",
+                "score": 0,
+                "max": 6
+              },
+              {
+                "name": "순고객수/매출건수",
+                "value": "0.42",
+                "score": 4,
+                "max": 6
+              },
+              {
+                "name": "순고객수 추세",
+                "value": "72%",
+                "score": 1,
+                "max": 3
+              }
+            ]
+          },
+          {
+            "key": "anomaly",
+            "label": "이상패턴 페널티",
+            "max": 5,
+            "score": 3,
+            "penalty": 2,
+            "flags": [
+              "동일 금액 반복 결제 비중 45%"
+            ],
+            "detail": "가장매출 의심 패턴 1건 — 동일 금액 반복 결제 비중 45%",
+            "items": [
+              {
+                "name": "탐지",
+                "value": "동일 금액 반복 결제 비중 45%",
+                "score": -2,
+                "max": 0
+              }
+            ]
+          }
+        ],
+        "metrics": {
+          "monthlyCount": 6,
+          "activeMonths": 4,
+          "avgActiveDays": 12.5,
+          "avgTxCount": 25.5,
+          "avgMonthlySales": 3000000,
+          "industryAvgSales": 6666667,
+          "industryRatio": 0.44999997750000115,
+          "avgUniqueCustomers": 10.75,
+          "customerRatio": 0.4215686274509804,
+          "customerTrend": 0.72,
+          "spikeRatio": 1.2,
+          "minActiveDays": 11,
+          "repeatedAmountRatio": 0.45
+        },
+        "monthly": [
+          {
+            "ym": "2026-04",
+            "sales": 3600000,
+            "txCount": 30,
+            "activeDays": 14,
+            "uniqueCustomers": 13
+          },
+          {
+            "ym": "2026-05",
+            "sales": 0,
+            "txCount": 0,
+            "activeDays": 0,
+            "uniqueCustomers": 0
+          },
+          {
+            "ym": "2026-06",
+            "sales": 3200000,
+            "txCount": 27,
+            "activeDays": 13,
+            "uniqueCustomers": 12
+          },
+          {
+            "ym": "2026-07",
+            "sales": 2800000,
+            "txCount": 24,
+            "activeDays": 12,
+            "uniqueCustomers": 10
+          },
+          {
+            "ym": "2026-08",
+            "sales": 0,
+            "txCount": 0,
+            "activeDays": 0,
+            "uniqueCustomers": 0
+          },
+          {
+            "ym": "2026-09",
+            "sales": 2400000,
+            "txCount": 21,
+            "activeDays": 11,
+            "uniqueCustomers": 8
+          }
+        ]
+      }
+    ]
+  },
+  "verifiedAt": "2026-09-07T15:26:51.654Z"
+}

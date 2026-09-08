@@ -1,0 +1,74 @@
+{
+  "success": true,
+  "businessNumber": "111*******",
+  "companyName": "옛날서비스",
+  "companyNameSource": "NTS",
+  "trustScore": {
+    "totalScore": 0,
+    "maxScore": 100,
+    "percentage": 0,
+    "businessYears": 6.3,
+    "gate": {
+      "level": "NONE",
+      "override": null,
+      "reasons": [],
+      "summary": "위험 신호 없음"
+    },
+    "verdict": {
+      "verdict": "REJECTED",
+      "label": "비대면 해제 불가",
+      "description": "검증 기준을 충족하지 못했습니다. 가까운 iM Bank 영업점을 방문해 주세요.",
+      "color": "#FF4D4F"
+    },
+    "breakdown": [
+      {
+        "step": 1,
+        "name": "기본 검증",
+        "icon": "🏛️",
+        "source": "국세청",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 0,
+        "detail": "계속사업자 확인 실패 (폐업 사업자)",
+        "passed": false
+      },
+      {
+        "step": 2,
+        "name": "사업장 위치",
+        "icon": "📍",
+        "source": "네이버 + 소상공인진흥공단",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 0,
+        "detail": "사업장 위치 확인 불가",
+        "passed": false
+      },
+      {
+        "step": 3,
+        "name": "영업 인허가",
+        "icon": "📋",
+        "source": "행정안전부 지방행정인허가",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 0,
+        "detail": "행정인허가 조회 결과 없음",
+        "passed": false,
+        "warned": true
+      },
+      {
+        "step": 4,
+        "name": "카드 FDS",
+        "icon": "💳",
+        "source": "BC카드 (민간 API 활성화 예정)",
+        "maxScore": 40,
+        "dataSource": "MOCK",
+        "score": 0,
+        "detail": "카드매출 데이터 없음",
+        "passed": false,
+        "subScores": [],
+        "noDataCase": null
+      }
+    ]
+  },
+  "verifiedAt": "2026-09-07T15:26:59.024Z"
+}

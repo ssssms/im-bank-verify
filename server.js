@@ -44,6 +44,12 @@ app.use(express.json({ limit: '10kb' }));
 // ── 라우터 연결 ────────────────────────────────────────────
 app.use('/api/verify', verifyRouter);
 
+// 관리자 룰 조정 (routes/admin.js) — ADMIN_ENABLED=true 일 때만 등록. 미설정이면 라우트가 없다.
+if (process.env.ADMIN_ENABLED === 'true') {
+  app.use('/api/admin', require('./routes/admin'));
+  console.log(`🔧 관리자 룰 조정 API 활성 (/api/admin/rules · 토큰 ${process.env.ADMIN_TOKEN ? '설정됨' : '⚠️ 미설정 — 모든 요청 거부'})`);
+}
+
 // 서버 상태 확인 엔드포인트
 app.get('/api/health', (req, res) => {
   res.json({

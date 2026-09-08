@@ -1,0 +1,267 @@
+{
+  "success": true,
+  "businessNumber": "555*******",
+  "companyName": "스마일카페",
+  "companyNameSource": "NTS",
+  "trustScore": {
+    "totalScore": 75,
+    "maxScore": 100,
+    "percentage": 75,
+    "businessYears": 1.7,
+    "gate": {
+      "level": "BLOCK",
+      "override": "REJECTED",
+      "reasons": [
+        {
+          "code": "badMerchantRegistered",
+          "level": "BLOCK",
+          "label": "카드업권 불량가맹점 등록",
+          "detail": "최근 12개월 내 카드업권 불량가맹점 정보에 등록된 이력이 있습니다.",
+          "source": "BC_ALARM"
+        },
+        {
+          "code": "salesPattern",
+          "level": "HOLD",
+          "label": "가장매출 의심 패턴 3건",
+          "detail": "직전 1개월 매출 급증(직전 3개월 평균의 30.8배) / 특정일 집중 매출(최소 영업일 2일) / 동일 금액 반복 결제 비중 72%",
+          "source": "FDS"
+        }
+      ],
+      "summary": "카드업권 불량가맹점 등록"
+    },
+    "verdict": {
+      "verdict": "REJECTED",
+      "label": "비대면 해제 불가",
+      "description": "위험 신호가 확인되었습니다 — 카드업권 불량가맹점 등록. 가까운 iM Bank 영업점을 방문해 주세요.",
+      "color": "#FF4D4F",
+      "gateLevel": "BLOCK",
+      "gateReasons": [
+        {
+          "code": "badMerchantRegistered",
+          "level": "BLOCK",
+          "label": "카드업권 불량가맹점 등록",
+          "detail": "최근 12개월 내 카드업권 불량가맹점 정보에 등록된 이력이 있습니다.",
+          "source": "BC_ALARM"
+        },
+        {
+          "code": "salesPattern",
+          "level": "HOLD",
+          "label": "가장매출 의심 패턴 3건",
+          "detail": "직전 1개월 매출 급증(직전 3개월 평균의 30.8배) / 특정일 집중 매출(최소 영업일 2일) / 동일 금액 반복 결제 비중 72%",
+          "source": "FDS"
+        }
+      ]
+    },
+    "breakdown": [
+      {
+        "step": 1,
+        "name": "기본 검증",
+        "icon": "🏛️",
+        "source": "국세청",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "계속사업자 확인 완료 (계속사업자 · 스마일카페)",
+        "passed": true
+      },
+      {
+        "step": 2,
+        "name": "사업장 위치",
+        "icon": "📍",
+        "source": "네이버 + 소상공인진흥공단",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "네이버 + 상권정보 DB 교차검증 완료 · 스마일카페",
+        "passed": true
+      },
+      {
+        "step": 3,
+        "name": "영업 인허가",
+        "icon": "📋",
+        "source": "행정안전부 지방행정인허가",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "식품위생법 휴게음식점 영업신고 유효 (2025.01 취득) — 스마일카페",
+        "passed": true
+      },
+      {
+        "step": 4,
+        "name": "카드 FDS",
+        "icon": "💳",
+        "source": "BC카드 (민간 API 활성화 예정)",
+        "maxScore": 40,
+        "dataSource": "MOCK",
+        "score": 15,
+        "detail": "카드매출 분석 (최근 6개월 · 월평균 723만원 · 49건 · 순고객 4명 · 급등락 매출 · 소수 반복 결제)",
+        "passed": false,
+        "riskAlert": true,
+        "subScores": [
+          {
+            "key": "continuity",
+            "label": "영업 지속성",
+            "max": 10,
+            "score": 6,
+            "detail": "최근 6개월 중 6개월 매출 발생 · 월평균 영업일 2.5일",
+            "items": [
+              {
+                "name": "매출 발생 월수",
+                "value": "6/6개월",
+                "score": 6,
+                "max": 6
+              },
+              {
+                "name": "월 매출 발생일수",
+                "value": "2.5일",
+                "score": 0,
+                "max": 4
+              }
+            ]
+          },
+          {
+            "key": "volume",
+            "label": "매출 규모·건수",
+            "max": 10,
+            "score": 6,
+            "detail": "월평균 49건 · 723만원 (업종 평균 대비 289%)",
+            "items": [
+              {
+                "name": "월평균 매출건수",
+                "value": "49건",
+                "score": 5,
+                "max": 5
+              },
+              {
+                "name": "업종 평균 대비",
+                "value": "289%",
+                "score": 1,
+                "max": 5
+              }
+            ]
+          },
+          {
+            "key": "customer",
+            "label": "순고객 분산도",
+            "max": 15,
+            "score": 3,
+            "detail": "월평균 순고객 4명 · 고객/건수 비율 0.09 · 추세 증가",
+            "items": [
+              {
+                "name": "월 순고객수(중복 제외)",
+                "value": "4명",
+                "score": 0,
+                "max": 6
+              },
+              {
+                "name": "순고객수/매출건수",
+                "value": "0.09",
+                "score": 0,
+                "max": 6
+              },
+              {
+                "name": "순고객수 추세",
+                "value": "189%",
+                "score": 3,
+                "max": 3
+              }
+            ]
+          },
+          {
+            "key": "anomaly",
+            "label": "이상패턴 페널티",
+            "max": 5,
+            "score": 0,
+            "penalty": 6,
+            "flags": [
+              "직전 1개월 매출 급증(직전 3개월 평균의 30.8배)",
+              "특정일 집중 매출(최소 영업일 2일)",
+              "동일 금액 반복 결제 비중 72%"
+            ],
+            "detail": "가장매출 의심 패턴 3건 — 직전 1개월 매출 급증(직전 3개월 평균의 30.8배) / 특정일 집중 매출(최소 영업일 2일) / 동일 금액 반복 결제 비중 72%",
+            "items": [
+              {
+                "name": "탐지",
+                "value": "직전 1개월 매출 급증(직전 3개월 평균의 30.8배)",
+                "score": -2,
+                "max": 0
+              },
+              {
+                "name": "탐지",
+                "value": "특정일 집중 매출(최소 영업일 2일)",
+                "score": -2,
+                "max": 0
+              },
+              {
+                "name": "탐지",
+                "value": "동일 금액 반복 결제 비중 72%",
+                "score": -2,
+                "max": 0
+              }
+            ]
+          }
+        ],
+        "metrics": {
+          "monthlyCount": 6,
+          "activeMonths": 6,
+          "avgActiveDays": 2.5,
+          "avgTxCount": 49.333333333333336,
+          "avgMonthlySales": 7233333.333333333,
+          "industryAvgSales": 2500000,
+          "industryRatio": 2.893333333333333,
+          "avgUniqueCustomers": 4.333333333333333,
+          "customerRatio": 0.08783783783783784,
+          "customerTrend": 1.888888888888889,
+          "spikeRatio": 30.810810810810814,
+          "minActiveDays": 2,
+          "repeatedAmountRatio": 0.72
+        },
+        "monthly": [
+          {
+            "ym": "2026-04",
+            "sales": 900000,
+            "txCount": 6,
+            "activeDays": 2,
+            "uniqueCustomers": 3
+          },
+          {
+            "ym": "2026-05",
+            "sales": 800000,
+            "txCount": 5,
+            "activeDays": 2,
+            "uniqueCustomers": 3
+          },
+          {
+            "ym": "2026-06",
+            "sales": 1000000,
+            "txCount": 7,
+            "activeDays": 3,
+            "uniqueCustomers": 3
+          },
+          {
+            "ym": "2026-07",
+            "sales": 1200000,
+            "txCount": 8,
+            "activeDays": 2,
+            "uniqueCustomers": 4
+          },
+          {
+            "ym": "2026-08",
+            "sales": 1500000,
+            "txCount": 10,
+            "activeDays": 3,
+            "uniqueCustomers": 4
+          },
+          {
+            "ym": "2026-09",
+            "sales": 38000000,
+            "txCount": 260,
+            "activeDays": 3,
+            "uniqueCustomers": 9
+          }
+        ]
+      }
+    ]
+  },
+  "verifiedAt": "2026-09-07T15:26:58.061Z"
+}

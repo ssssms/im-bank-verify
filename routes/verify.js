@@ -21,6 +21,14 @@ const { getSalesData }        = require('../services/mockSales.service');
 const { getCompanyName }      = require('../services/bizno.service'); // 상호명 병렬 보완(참고용)
 // 홈택스(5단계) 제거 — 4단계 모델. mockHometax.service.js는 롤백 대비 보존, import 안 함.
 const { calculateTrustScore, calcStepScore } = require('../utils/scoreEngine');
+const { stepMeta, decorateBreakdown } = require('../utils/evidence'); // 조회 근거·출처 라벨·소요시간
+
+// 서비스 호출을 감싸 소요시간(ms)을 함께 돌려준다
+async function timed(fn) {
+  const t0 = Date.now();
+  const value = await fn();
+  return { value, ms: Date.now() - t0 };
+}
 
 function validateBusinessNumber(raw) {
   const cleaned = (raw || '').replace(/-/g, '').replace(/\s/g, '');
@@ -135,8 +143,13 @@ router.post('/business', async (req, res) => {
   // 상호명은 국세청 검증과 병렬로 조회(참고용). 실패해도 아래 흐름에 영향 없음.
   const companyNamePromise = getCompanyName(cleanBizNum);
 
+  const ctx = { businessNumber: cleanBizNum, storeName: name };
+  const t0 = Date.now();
+  const elapsed = {};
+
   try {
-    const ntsResult = await checkBusinessStatus(cleanBizNum);
+    const nts = await timed(() => checkBusinessStatus(cleanBizNum));
+    const ntsResult = nts.value; elapsed[1] = nts.ms;
 
     let locationResult = null;
     let licenseResult  = null;
@@ -144,19 +157,23 @@ router.post('/business', async (req, res) => {
 
     if (ntsResult.businessStatus === 'ACTIVE') {
       // 위치 검증을 먼저 실행하여 주소를 인허가 검증에 활용
-      [locationResult, salesResult] = await Promise.all([
-        verifyLocation(cleanBizNum, name),
-        getSalesData(cleanBizNum, name),
+      const [loc, sales] = await Promise.all([
+        timed(() => verifyLocation(cleanBizNum, name)),
+        timed(() => getSalesData(cleanBizNum, name)),
       ]);
+      locationResult = loc.value; elapsed[2] = loc.ms;
+      salesResult    = sales.value; elapsed[4] = sales.ms;
       // 인허가: location 주소로 프랜차이즈 지점 매칭
       const locAddr = locationResult?.address || locationResult?.jibunAddress || null;
-      licenseResult = await getLicenseInfo(cleanBizNum, name, locAddr);
+      const lic = await timed(() => getLicenseInfo(cleanBizNum, name, locAddr));
+      licenseResult = lic.value; elapsed[3] = lic.ms;
     }
 
-    const trustScore = calculateTrustScore({
+    const results = { 1: ntsResult, 2: locationResult, 3: licenseResult, 4: salesResult };
+    const trustScore = decorateBreakdown(calculateTrustScore({
       nts: ntsResult, location: locationResult, license: licenseResult,
       sales: salesResult,
-    });
+    }), results, ctx, elapsed);
 
     console.log(`[검증 완료] 점수: ${trustScore.totalScore}점 / 판정: ${trustScore.verdict.verdict}`);
 
@@ -170,6 +187,7 @@ router.post('/business', async (req, res) => {
       companyName: resolvedName,
       companyNameSource: biznoResult.found ? 'BIZNO' : (ntsResult.companyName ? 'NTS' : 'NONE'),
       trustScore,
+      totalElapsedMs: Date.now() - t0,
       verifiedAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -203,50 +221,62 @@ router.get('/stream', async (req, res) => {
   // 상호명은 단계 검증과 병렬로 조회(참고용). 완료 시점에만 취합, 실패해도 무영향.
   const companyNamePromise = getCompanyName(cleanBizNum);
 
+  // 조회 근거·출처 라벨·소요시간 (2026-09-08) — 각 완료 이벤트에 evidence[]·elapsedMs·sourceLabel·fallback 을 싣는다
+  const ctx = { businessNumber: cleanBizNum, storeName: name };
+  const t0 = Date.now();
+  const elapsed = {};
+
   try {
     // ── Step 1: 국세청 ────────────────────────────────────────
     send(1, { status: 'loading', message: '국세청 사업자 상태 조회 중...' });
-    const ntsResult = await checkBusinessStatus(cleanBizNum);
+    const nts = await timed(() => checkBusinessStatus(cleanBizNum));
+    const ntsResult = nts.value; elapsed[1] = nts.ms;
     const ntsScore  = calcStepScore(1, ntsResult);
     send(1, {
       status: ntsResult.businessStatus === 'ACTIVE' ? 'success' : 'failed',
       result: ntsResult,
       score:  ntsScore.score,
       detail: ntsScore.detail,
+      ...stepMeta(1, ntsResult, ctx, elapsed[1]),
     });
 
     if (ntsResult.businessStatus !== 'ACTIVE') {
-      const trustScore = calculateTrustScore({
+      const trustScore = decorateBreakdown(calculateTrustScore({
         nts: ntsResult, location: null, license: null, sales: null,
-      });
+      }), { 1: ntsResult }, ctx, elapsed);
       // 휴/폐업이어도 상호명(참고용)은 표시. 판정은 국세청 기준 그대로.
       const biznoResult = await companyNamePromise;
       const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
-      send('done', { trustScore, companyName: resolvedName });
+      send('done', { trustScore, companyName: resolvedName, totalElapsedMs: Date.now() - t0 });
       return res.end();
     }
 
     // ── Step 2: 사업장 위치 ───────────────────────────────────
     send(2, { status: 'loading', message: '네이버 + 소상공인진흥공단 사업장 위치 교차검증 중...' });
-    const locationResult = await verifyLocation(cleanBizNum, name);
+    const loc = await timed(() => verifyLocation(cleanBizNum, name));
+    const locationResult = loc.value; elapsed[2] = loc.ms;
     const locationScore  = calcStepScore(2, locationResult);
+    const locationMeta   = stepMeta(2, locationResult, ctx, elapsed[2]);
     send(2, {
       status: locationResult.matched ? 'success' : 'failed',
       result: locationResult,
       score:  locationScore.score,
       detail: locationScore.detail,
+      ...locationMeta,
     });
 
     // ── Step 3: 영업 인허가 ───────────────────────────────────
     send(3, { status: 'loading', message: '행정안전부 지방행정인허가 조회 중...' });
     const licenseAddress = locationResult?.address || locationResult?.jibunAddress || null;
-    const licenseResult = await getLicenseInfo(cleanBizNum, name, licenseAddress);
+    const lic = await timed(() => getLicenseInfo(cleanBizNum, name, licenseAddress));
+    const licenseResult = lic.value; elapsed[3] = lic.ms;
     const licenseScore  = calcStepScore(3, licenseResult);
     send(3, {
       status: licenseResult.hasLicense ? 'success' : 'warning',
       result: licenseResult,
       score:  licenseScore.score,
       detail: licenseScore.detail,
+      ...stepMeta(3, licenseResult, ctx, elapsed[3]),
     });
 
     // 인허가 주소로 2단계 위치 교차검증 업그레이드 확인
@@ -258,30 +288,34 @@ router.get('/stream', async (req, res) => {
           result: locationResult,
           score:  upgradedScore.score,
           detail: upgradedScore.detail,
+          ...locationMeta,
         });
       }
     }
 
     // ── Step 4: 카드 FDS ──────────────────────────────────────
     send(4, { status: 'loading', message: 'BC카드 매출 패턴 분석 중 (가맹점 본질 검증)...' });
-    const salesResult = await getSalesData(cleanBizNum, name);
+    const sales = await timed(() => getSalesData(cleanBizNum, name));
+    const salesResult = sales.value; elapsed[4] = sales.ms;
     const salesScore  = calcStepScore(4, salesResult, ntsResult); // ntsResult = 무데이터 3분해용
     send(4, {
       status: salesResult.hasData ? 'success' : 'warning',
       result: salesResult,
       score:  salesScore.score,
       detail: salesScore.detail,
+      ...stepMeta(4, salesResult, ctx, elapsed[4]),
     });
 
     // ── 최종 결과 ─────────────────────────────────────────────
-    const trustScore = calculateTrustScore({
+    const results = { 1: ntsResult, 2: locationResult, 3: licenseResult, 4: salesResult };
+    const trustScore = decorateBreakdown(calculateTrustScore({
       nts: ntsResult, location: locationResult, license: licenseResult,
       sales: salesResult,
-    });
+    }), results, ctx, elapsed);
     // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → 없으면 '' (프론트 '상호명 미확인')
     const biznoResult = await companyNamePromise;
     const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
-    send('done', { trustScore, companyName: resolvedName });
+    send('done', { trustScore, companyName: resolvedName, totalElapsedMs: Date.now() - t0 });
 
   } catch (err) {
     send('error', { message: err.message });

@@ -17,6 +17,13 @@ const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222
 
 // ── Mock 데이터 테이블 ─────────────────────────────────────────
 // 시연 시나리오별 사업자번호 → 결과 매핑
+// 오늘 기준 n개월 전 날짜(YYYY-MM-DD) — 신설 시나리오의 업력을 시연일과 무관하게 고정
+function monthsAgoISO(n) {
+  const d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 const MOCK_BUSINESSES = {
   // 시나리오 A: 우량 사업자 (고득점 → 승인)
   '1234567890': {
@@ -34,11 +41,12 @@ const MOCK_BUSINESSES = {
     companyName: '행복마트',
     ceoName: '이*수',
   },
-  // 시나리오 C: 신설 사업자 (업력 6개월 → 조건부 승인, 서류 2종)
+  // 시나리오 C: 신설 사업자 — 업력 4개월 + 카드매출 없음 → 판단 불가(INELIGIBLE) → 현행 절차(영업점)
+  // [2026-09-08 수정] 등록일을 '오늘 기준 4개월 전'으로 고정 산출해 시연일이 지나도 업력이 6개월 미만으로 유지된다.
   '2222222222': {
     businessStatus: 'ACTIVE',
     businessType: '음식업',
-    registrationDate: '2025-10-01',
+    registrationDate: monthsAgoISO(4),
     companyName: '새로운분식',
     ceoName: '최*영',
   },

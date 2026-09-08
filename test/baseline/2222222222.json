@@ -1,0 +1,73 @@
+{
+  "success": true,
+  "businessNumber": "222*******",
+  "companyName": "새로운분식",
+  "companyNameSource": "NTS",
+  "trustScore": {
+    "totalScore": 60,
+    "maxScore": 100,
+    "percentage": 60,
+    "businessYears": 0.9,
+    "gate": {
+      "level": "NONE",
+      "override": null,
+      "reasons": [],
+      "summary": "위험 신호 없음"
+    },
+    "verdict": {
+      "verdict": "PENDING",
+      "label": "추가 서류 필요",
+      "description": "일부 검증을 통과하지 못했습니다. 추가 서류를 제출하면 한도 해제가 가능합니다.",
+      "color": "#FFB800"
+    },
+    "breakdown": [
+      {
+        "step": 1,
+        "name": "기본 검증",
+        "icon": "🏛️",
+        "source": "국세청",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "계속사업자 확인 완료 (계속사업자 · 새로운분식)",
+        "passed": true
+      },
+      {
+        "step": 2,
+        "name": "사업장 위치",
+        "icon": "📍",
+        "source": "네이버 + 소상공인진흥공단",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "네이버 + 상권정보 DB 교차검증 완료 · 새로운분식",
+        "passed": true
+      },
+      {
+        "step": 3,
+        "name": "영업 인허가",
+        "icon": "📋",
+        "source": "행정안전부 지방행정인허가",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "일반음식점 영업허가 유효 (2025.09 취득) — 새로운분식",
+        "passed": true
+      },
+      {
+        "step": 4,
+        "name": "카드 FDS",
+        "icon": "💳",
+        "source": "BC카드 (민간 API 활성화 예정)",
+        "maxScore": 40,
+        "dataSource": "MOCK",
+        "score": 0,
+        "detail": "신규 개업 — 카드매출 이력이 쌓이기 전 단계",
+        "passed": false,
+        "subScores": [],
+        "noDataCase": "C"
+      }
+    ]
+  },
+  "verifiedAt": "2026-09-07T15:26:54.609Z"
+}

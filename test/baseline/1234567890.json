@@ -1,0 +1,219 @@
+{
+  "success": true,
+  "businessNumber": "123*******",
+  "companyName": "(주)맛있는식당",
+  "companyNameSource": "NTS",
+  "trustScore": {
+    "totalScore": 100,
+    "maxScore": 100,
+    "percentage": 100,
+    "businessYears": 7.5,
+    "gate": {
+      "level": "NONE",
+      "override": null,
+      "reasons": [],
+      "summary": "위험 신호 없음"
+    },
+    "verdict": {
+      "verdict": "APPROVED",
+      "label": "한도 해제 승인",
+      "description": "정상 운영 가맹점으로 확인되었습니다. 한도제한계좌가 즉시 해제됩니다. (카드매출 FDS 40/40점 · 업력 7.5년)",
+      "color": "#00C3A5"
+    },
+    "breakdown": [
+      {
+        "step": 1,
+        "name": "기본 검증",
+        "icon": "🏛️",
+        "source": "국세청",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "계속사업자 확인 완료 (계속사업자 · (주)맛있는식당)",
+        "passed": true
+      },
+      {
+        "step": 2,
+        "name": "사업장 위치",
+        "icon": "📍",
+        "source": "네이버 + 소상공인진흥공단",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "네이버 + 상권정보 DB 교차검증 완료 · (주)맛있는식당",
+        "passed": true
+      },
+      {
+        "step": 3,
+        "name": "영업 인허가",
+        "icon": "📋",
+        "source": "행정안전부 지방행정인허가",
+        "maxScore": 20,
+        "dataSource": "MOCK",
+        "score": 20,
+        "detail": "식품위생법 일반음식점 영업허가 유효 (2019.03 취득)",
+        "passed": true
+      },
+      {
+        "step": 4,
+        "name": "카드 FDS",
+        "icon": "💳",
+        "source": "BC카드 (민간 API 활성화 예정)",
+        "maxScore": 40,
+        "dataSource": "MOCK",
+        "score": 40,
+        "detail": "카드매출 + 전자세금계산서 분석 (최근 6개월 · 월평균 1250만원 · 180건 · 순고객 162명 · 꾸준한 매출 · 다양한 고객)",
+        "passed": true,
+        "riskAlert": false,
+        "subScores": [
+          {
+            "key": "continuity",
+            "label": "영업 지속성",
+            "max": 10,
+            "score": 10,
+            "detail": "최근 6개월 중 6개월 매출 발생 · 월평균 영업일 26.2일",
+            "items": [
+              {
+                "name": "매출 발생 월수",
+                "value": "6/6개월",
+                "score": 6,
+                "max": 6
+              },
+              {
+                "name": "월 매출 발생일수",
+                "value": "26.2일",
+                "score": 4,
+                "max": 4
+              }
+            ]
+          },
+          {
+            "key": "volume",
+            "label": "매출 규모·건수",
+            "max": 10,
+            "score": 10,
+            "detail": "월평균 180건 · 1250만원 (업종 평균 대비 110%)",
+            "items": [
+              {
+                "name": "월평균 매출건수",
+                "value": "180건",
+                "score": 5,
+                "max": 5
+              },
+              {
+                "name": "업종 평균 대비",
+                "value": "110%",
+                "score": 5,
+                "max": 5
+              }
+            ]
+          },
+          {
+            "key": "customer",
+            "label": "순고객 분산도",
+            "max": 15,
+            "score": 15,
+            "detail": "월평균 순고객 162명 · 고객/건수 비율 0.90 · 추세 증가",
+            "items": [
+              {
+                "name": "월 순고객수(중복 제외)",
+                "value": "162명",
+                "score": 6,
+                "max": 6
+              },
+              {
+                "name": "순고객수/매출건수",
+                "value": "0.90",
+                "score": 6,
+                "max": 6
+              },
+              {
+                "name": "순고객수 추세",
+                "value": "108%",
+                "score": 3,
+                "max": 3
+              }
+            ]
+          },
+          {
+            "key": "anomaly",
+            "label": "이상패턴 페널티",
+            "max": 5,
+            "score": 5,
+            "penalty": 0,
+            "flags": [],
+            "detail": "가장매출 의심 패턴 없음",
+            "items": [
+              {
+                "name": "이상패턴",
+                "value": "미탐지",
+                "score": 5,
+                "max": 5
+              }
+            ]
+          }
+        ],
+        "metrics": {
+          "monthlyCount": 6,
+          "activeMonths": 6,
+          "avgActiveDays": 26.166666666666668,
+          "avgTxCount": 180,
+          "avgMonthlySales": 12500000,
+          "industryAvgSales": 11363636,
+          "industryRatio": 1.1000000352000012,
+          "avgUniqueCustomers": 162,
+          "customerRatio": 0.9,
+          "customerTrend": 1.0769230769230769,
+          "spikeRatio": 1.0742705570291777,
+          "minActiveDays": 25,
+          "repeatedAmountRatio": 0.08
+        },
+        "monthly": [
+          {
+            "ym": "2026-04",
+            "sales": 11800000,
+            "txCount": 170,
+            "activeDays": 25,
+            "uniqueCustomers": 152
+          },
+          {
+            "ym": "2026-05",
+            "sales": 12000000,
+            "txCount": 174,
+            "activeDays": 26,
+            "uniqueCustomers": 156
+          },
+          {
+            "ym": "2026-06",
+            "sales": 12200000,
+            "txCount": 178,
+            "activeDays": 26,
+            "uniqueCustomers": 160
+          },
+          {
+            "ym": "2026-07",
+            "sales": 12600000,
+            "txCount": 182,
+            "activeDays": 27,
+            "uniqueCustomers": 164
+          },
+          {
+            "ym": "2026-08",
+            "sales": 12900000,
+            "txCount": 186,
+            "activeDays": 26,
+            "uniqueCustomers": 168
+          },
+          {
+            "ym": "2026-09",
+            "sales": 13500000,
+            "txCount": 190,
+            "activeDays": 27,
+            "uniqueCustomers": 172
+          }
+        ]
+      }
+    ]
+  },
+  "verifiedAt": "2026-09-07T15:26:48.599Z"
+}
