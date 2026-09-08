@@ -17,6 +17,8 @@
  * 여기서 똑같이 판정해, 그 조건인데 MOCK 이 돌아왔으면 폴백으로 본다.
  */
 const { calcBusinessYears } = require('./businessAge');
+const { ALARM_RULES } = require('./negativeGate');
+const alarmLabel = key => ALARM_RULES.find(r => r.key === key)?.label || key;
 
 const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
 
@@ -129,7 +131,7 @@ function evidenceSales(r) {
     lines.push(`BC: 월평균 매출 ${(avgSales / 10000).toFixed(0)}만원${ratio}${r.dataType === 'CARD_AND_ETAX' ? ' · 전자세금계산서 병행' : ''}`);
   }
   const alarmKeys = Object.keys(r.alarms || {}).filter(k => r.alarms[k]);
-  if (alarmKeys.length) lines.push(`BC 알람: ${alarmKeys.length}건 (${alarmKeys.join(', ')})`);
+  if (alarmKeys.length) lines.push(`BC 알람: ${alarmKeys.length}건 (${alarmKeys.map(alarmLabel).join(', ')})`);
   return lines.slice(0, 3);
 }
 
