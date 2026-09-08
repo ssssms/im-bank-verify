@@ -41,7 +41,7 @@ function checkEligibility({ nts, sales } = {}) {
     reasons.push({
       code: 'NEW_BUSINESS',
       label: `업력 ${MIN_BUSINESS_MONTHS}개월 미만`,
-      detail: `사업자등록 후 ${businessMonths}개월 — 카드매출 ${MIN_SALES_MONTHS}개월 이력이 쌓이기 전입니다.`,
+      detail: `사업자등록 후 ${businessMonths}개월. 카드매출 ${MIN_SALES_MONTHS}개월 이력이 쌓이기 전입니다.`,
     });
   }
 
@@ -51,7 +51,7 @@ function checkEligibility({ nts, sales } = {}) {
       label: '카드매출 데이터 없음',
       detail: sales?.merchantRegistered
         ? '카드 가맹점으로 등록되어 있으나 카드매출 데이터가 없습니다.'
-        : '카드 가맹점 미등록 — 카드매출 데이터가 없습니다.',
+        : '카드 가맹점 미등록. 카드매출 데이터가 없습니다.',
     });
   } else if (salesMonths < MIN_SALES_MONTHS) {
     reasons.push({

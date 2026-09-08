@@ -80,14 +80,14 @@ function evidenceLocation(r) {
   const lines = [];
   const name = r.matchedStoreName || null;
   if (r.step1) {
-    lines.push(`네이버: ${[name, r.address].filter(Boolean).join(' · ')} — 일치`);
+    lines.push(`네이버: ${[name, r.address].filter(Boolean).join(' · ')}, 일치`);
   } else {
-    lines.push('네이버: 검색 결과 없음 — 불일치');
+    lines.push('네이버: 검색 결과 없음, 불일치');
   }
   if (r.step1) {
     lines.push(r.step2
-      ? `소진공: ${name || '상권정보'} — 반경 내 일치`
-      : `소진공: ${name || '상권정보'} — 미등록`);
+      ? `소진공: ${name || '상권정보'}, 반경 내 일치`
+      : `소진공: ${name || '상권정보'}, 미등록`);
   }
   if (r.confidence) lines.push(`교차검증 신뢰도: ${({ HIGH: '높음(2개 소스)', MEDIUM: '보통(1개 소스)', NONE: '없음' })[r.confidence] || r.confidence}`);
   return lines.slice(0, 3);

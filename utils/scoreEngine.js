@@ -131,9 +131,9 @@ function resolveNoDataCase(salesResult, ntsResult) {
 }
 
 const NO_DATA_DETAIL = {
-  A: '카드 가맹점 미등록 — 카드 결제를 받지 않는 업종으로 추정',
-  B: '카드 가맹점 등록 확인 · 최근 6개월 카드매출 없음 — 추가 확인 필요',
-  C: '신규 개업 — 카드매출 이력이 쌓이기 전 단계',
+  A: '카드 가맹점 미등록. 카드 결제를 받지 않는 업종으로 추정',
+  B: '카드 가맹점 등록 확인 · 최근 6개월 카드매출 없음. 추가 확인 필요',
+  C: '신규 개업. 카드매출 이력이 쌓이기 전 단계',
 };
 
 function calcSalesScore(salesResult, ntsResult) {
@@ -151,7 +151,7 @@ function calcSalesScore(salesResult, ntsResult) {
   if (salesResult.anomalyFlag) {
     return {
       score: 0,
-      detail: '카드매출 패턴 이상 감지 — 추가 확인 필요',
+      detail: '카드매출 패턴 이상 감지. 추가 확인 필요',
       passed: false,
       anomalyFlag: true,
       subScores: [],
@@ -200,7 +200,7 @@ function calcHometaxScore(hometaxResult) {
     return { score: 0, detail: hometaxResult?.detail || '홈택스 신고 이력 없음', passed: false };
   }
   if (hometaxResult.taxArrears) {
-    return { score: 0, detail: '체납 이력 확인 — 한도 해제 불가', passed: false };
+    return { score: 0, detail: '체납 이력 확인. 한도 해제 불가', passed: false };
   }
   // status: NORMAL(만점 15) / PARTIAL(부분 7) / NEW(신설 5) / NONE(0)
   if (hometaxResult.status === 'NORMAL') {
@@ -220,7 +220,7 @@ function calcHometaxScore(hometaxResult) {
   if (hometaxResult.status === 'NEW') {
     return {
       score: 5,
-      detail: hometaxResult.detail || `신설 사업자 — 검증 데이터 부족`,
+      detail: hometaxResult.detail || `신설 사업자. 검증 데이터 부족`,
       passed: true,
     };
   }
@@ -304,7 +304,7 @@ function buildRemedies({ locationScore, licenseScore, salesScore, gate }) {
   if (causes.length) remedies.push({ cause: causes.join(' · '), evidence: HUMAN_REVIEW });
 
   if (gate?.level === 'HOLD') {
-    remedies.push({ cause: `위험 신호 보류 — ${gate.summary}`, evidence: HUMAN_REVIEW });
+    remedies.push({ cause: `위험 신호 보류: ${gate.summary}`, evidence: HUMAN_REVIEW });
   }
   return remedies;
 }
@@ -363,7 +363,7 @@ function nextStepRejected(kind, gate) {
     type: 'BRANCH_INSPECTION', reasonCode: 'SCORE_BELOW_CUT',
     title: '영업점 현장 확인(실사)',
     lines: [
-      '검증 기준 미달 — 영업점 현장 확인(실사) 절차로 안내합니다.',
+      '검증 기준 미달. 영업점 현장 확인(실사) 절차로 안내합니다.',
       lock,
     ],
     remedies: [], docs: [], reverifyAvailable: false,
@@ -409,7 +409,7 @@ function getVerdict(totalScore, {
   // ② 네거티브 게이트 BLOCK — 점수 무관 차단
   if (gate?.level === 'BLOCK') {
     return withUi('REJECTED', {
-      description: `위험 신호가 확인되었습니다 — ${gate.summary}. 비대면 해제가 불가합니다.`,
+      description: `위험 신호가 확인되었습니다 (${gate.summary}). 비대면 해제가 불가합니다.`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
       nextStep: nextStepRejected('GATE_BLOCK', gate),
@@ -431,7 +431,7 @@ function getVerdict(totalScore, {
   // ④ 네거티브 게이트 HOLD — 점수 무관 보류 (사람이 봐야 하는 신호)
   if (gate?.level === 'HOLD') {
     return withUi('PENDING', {
-      description: `${gate.summary} — 본부 담당자가 확인합니다.`,
+      description: `${gate.summary}. 본부 담당자가 확인합니다.`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
       nextStep: nextStepPending(remedyCtx),
@@ -451,7 +451,7 @@ function getVerdict(totalScore, {
   }
   if (totalScore >= RULES.PENDING_CUT) {
     return withUi('PENDING', {
-      description: `총점 ${totalScore}점 — 데이터만으로 확정할 수 없어 본부 담당자가 원격으로 확인합니다.`,
+      description: `총점 ${totalScore}점. 데이터만으로 확정할 수 없어 본부 담당자가 원격으로 확인합니다.`,
       nextStep: nextStepPending(remedyCtx),
     });
   }
