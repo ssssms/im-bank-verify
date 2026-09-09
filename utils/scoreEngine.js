@@ -327,8 +327,8 @@ function nextStepPending(ctx) {
     type: 'REMOTE_REVIEW',
     title: '본부 원격 확인',
     lines: [
-      '데이터만으로 확정할 수 없어 본부 담당자가 원격으로 확인합니다.',
-      '사업자등록증·부가가치세 증명 등 등록 서류는 요구하지 않습니다.',
+      '데이터만으로 확정할 수 없어 본부 담당자가 아래 항목을 원격으로 확인한 뒤 결과를 문자로 알려드립니다.',
+      '따로 제출할 서류는 없습니다. 확인에 필요하면 담당자가 아래 자료를 요청합니다. (사업자등록증·부가가치세 증명 등 등록 서류는 요구하지 않습니다)',
       `${RULES.REVERIFY_AFTER_MONTHS}개월 후 자동 재검증을 예약할 수 있습니다. 카드매출이 개선되면 다음 검증에서 자동 반영됩니다.`,
     ],
     remedies: buildRemedies(ctx), docs: [], reverifyAvailable: true,
