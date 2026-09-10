@@ -43,7 +43,8 @@ const round1 = n => Math.round(n * 10) / 10;
 // ── 시계열에서 파생 지표 산출 ─────────────────────────────────
 function deriveMetrics(sales) {
   const monthly = Array.isArray(sales.monthly) ? sales.monthly : [];
-  const active = monthly.filter(m => (m.sales || 0) > 0);
+  // 매출 발생 달 = 순매출 > 0 또는 결제 건수 > 0. [2026-09-11] 환불이 매출을 넘어 순매출이 음수인 달(그린헬스 2026.02, 25건)도 영업한 달로 본다
+  const active = monthly.filter(m => (m.sales || 0) > 0 || (m.txCount || 0) > 0);
 
   const sum = (arr, key) => arr.reduce((a, m) => a + (m[key] || 0), 0);
   const avg = (arr, key) => (arr.length ? sum(arr, key) / arr.length : 0);
@@ -111,8 +112,14 @@ function scoreVolume(m, R) {
   // 업종 평균 대비 정상 범위(70~150%)면 만점, 과대(250%+)는 가장매출 의심으로 감점
   const I = R.VOLUME_INDUSTRY;
   let ratioPt = 0;
+  let ratioNote = '';
   if (m.industryRatio >= I.NORMAL_MIN && m.industryRatio <= I.NORMAL_MAX) ratioPt = I.NORMAL_PT;
-  else if (m.industryRatio >= I.EXCESS)   ratioPt = I.EXCESS_PT;
+  else if (m.industryRatio > I.NORMAL_MAX) {
+    // [2026-09-11] 업종평균 상회: 직전 달 급증이 함께 있을 때만 「과대(가장매출 의심)」, 아니면 실적 우수(ABOVE_PT)
+    const spike = m.spikeRatio >= R.ANOMALY.SPIKE_RATIO;
+    if (m.industryRatio >= I.EXCESS && spike) { ratioPt = I.EXCESS_PT; ratioNote = ' · 과대+급증'; }
+    else { ratioPt = I.ABOVE_PT ?? I.LOW_PT; ratioNote = ' · 업종 상회'; }
+  }
   else if (m.industryRatio >= I.LOW)      ratioPt = I.LOW_PT;
   else if (m.industryRatio >= I.VERY_LOW) ratioPt = I.VERY_LOW_PT;
 
@@ -121,10 +128,10 @@ function scoreVolume(m, R) {
     label: '매출 규모·건수',
     max: 10,
     score: txPt + ratioPt,
-    detail: `월평균 ${Math.round(m.avgTxCount)}건 · ${(m.avgMonthlySales / 10000).toFixed(0)}만원 (업종 평균 대비 ${Math.round(m.industryRatio * 100)}%)`,
+    detail: `월평균 ${Math.round(m.avgTxCount)}건 · ${(m.avgMonthlySales / 10000).toFixed(0)}만원 (업종 평균 대비 ${Math.round(m.industryRatio * 100)}%${ratioNote})`,
     items: [
       { name: '월평균 매출건수', value: `${Math.round(m.avgTxCount)}건`, score: txPt, max: 5 },
-      { name: '업종 평균 대비', value: `${Math.round(m.industryRatio * 100)}%`, score: ratioPt, max: 5 },
+      { name: '업종 평균 대비', value: `${Math.round(m.industryRatio * 100)}%${ratioNote}`, score: ratioPt, max: 5 },
     ],
   };
 }

@@ -16,7 +16,8 @@
  */
 
 const axios = require('axios');
-const { getMerchantRegion } = require('./bcData.service'); // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
+const { getMerchantRegion } = require('./bcData.service');
+const { rankCandidates } = require('../utils/licenseMatch'); // 사업체 특정(상호·주소·상태 채점, 2026-09-11) // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
 const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
@@ -244,25 +245,20 @@ async function getLicenseLive(storeName, address, businessNumber) {
   if (failed.length) console.warn(`[인허가] 응답 없음: ${failed.join(', ')}`);
   if (unavailable.length) console.warn(`[인허가] 미승인·오류 API 제외: ${unavailable.join(', ')}`);
 
-  const scored = candidates.map(c => {
-    const i = c.item;
-    const addr = `${i.ROAD_NM_ADDR || ''} ${i.LOTNO_ADDR || ''}`;
-    const sim = nameSimilar(i.BPLC_NM, storeName);
-    const rm = regionMatch(addr, region);
-    const am = matchAddress(addr, address); // 네이버 주소 키워드 겹침 비율 0~1
-    const active = isActiveStatus(i.DTL_SALS_STTS_NM);
-    return { ...c, sim, rm, am, active, score: sim * 2 + (rm.sigungu ? 3 : 0) + (rm.dong ? 1 : 0) + am * 2 + (active ? 1 : 0) };
-  })
-    .filter(c => c.sim >= 1)
-    .filter(c => !region || c.rm.sigungu) // BC 등록 지역 밖은 다른 가게
-    .sort((a, b) => b.score - a.score);
-
-  const best = scored.find(c => c.active) || null;
-  const bcRegion = region ? { sido: region.sido, sigungu: region.sigungu, dong: region.dong, matched: !!best?.rm.sigungu, dongMatched: !!best?.rm.dong } : null;
+  // ── 사업체 특정(2026-09-11): utils/licenseMatch.js — 상호 40 · 주소 50 · 영업 상태 10, 등급 EXACT/HIGH/MEDIUM/LOW/NONE ──
+  //   HIGH 이상만 「이 사업체의 인허가」로 인정(20점). MEDIUM 이하는 「동일 사업체 여부 추가 확인 필요」로 0점 + 후보 표.
+  const ranked = rankCandidates(candidates, { storeName, region, address: address || null, jibunAddress: null })
+    .filter(c => c.nameScore > 0)
+    .filter(c => !region || !c.misses.some(m => m.startsWith('시군구 불일치'))); // BC 등록 지역 밖은 다른 가게
+  const toCandidate = c => ({ name: c.name, address: c.address, type: c.type, status: c.status, matchScore: c.matchScore, confidence: c.confidence, reasons: c.reasons, misses: c.misses });
+  const CONFIRMED = new Set(['EXACT', 'HIGH']);
+  const best = ranked.find(c => c.active && CONFIRMED.has(c.confidence)) || null;
+  const topAny = ranked[0] || null;
+  const bcRegion = region ? { sido: region.sido, sigungu: region.sigungu, dong: region.dong, matched: !!(best || topAny)?.reasons.some(r => r.includes('시군구 일치')), dongMatched: !!(best || topAny)?.reasons.includes('행정동 일치') } : null;
+  const licenseMatch = { score: (best || topAny)?.matchScore ?? 0, confidence: best ? best.confidence : (topAny ? (CONFIRMED.has(topAny.confidence) ? 'MEDIUM' : topAny.confidence) : 'NONE'), reasons: (best || topAny)?.reasons || [], misses: (best || topAny)?.misses || [], candidates: ranked.slice(0, 5).map(toCandidate) };
 
   if (best) {
     const a = best.item;
-    if (best.am > 0) console.log(`[인허가] 주소 매칭: ${a.BPLC_NM} (score: ${best.am.toFixed(2)})`);
     return {
       hasLicense: true,
       licenseType: best.type,
@@ -271,13 +267,13 @@ async function getLicenseLive(storeName, address, businessNumber) {
       expiryDate: a.CLSBIZ_YMD || null,
       address: a.ROAD_NM_ADDR || a.LOTNO_ADDR || '',
       bcRegion,
+      licenseMatch,
       detail: `${best.type} 영업허가 유효 (${a.LCPMT_YMD || '취득일 미상'}) — ${a.BPLC_NM}`,
     };
   }
 
-  // 영업 중 일치는 없고 동명(같은 지역) 폐업·휴업만 있는 경우 — 상호 완전 일치이거나 행정동까지 맞을 때만 「폐업」으로 본다.
-  // (같은 구의 「그린헬스클럽(방촌동) 폐업」을 신천3동 「그린헬스」의 폐업으로 보이면 안 된다 → 그 경우는 조회 결과 없음)
-  const closed = scored.find(c => c.sim === 2 || c.rm.dong) || null;
+  // 영업 중 확정(HIGH+) 후보가 없음. 상호 완전 일치·주소 근거가 있는 폐업 후보면 「폐업」, 후보는 있는데 확신이 안 되면 「추가 확인 필요」, 아니면 조회 결과 없음
+  const closed = ranked.find(c => !c.active && c.nameScore === 40 && c.matchScore >= 65 && (c.reasons.includes('행정동 일치') || c.reasons.includes('건물번호 일치'))) || null;
   if (closed) {
     const a = closed.item;
     return {
@@ -287,8 +283,23 @@ async function getLicenseLive(storeName, address, businessNumber) {
       licenseDate: a.LCPMT_YMD || '',
       expiryDate: a.CLSBIZ_YMD || null,
       address: a.ROAD_NM_ADDR || a.LOTNO_ADDR || '',
-      bcRegion: bcRegion ? { ...bcRegion, matched: !!closed.rm.sigungu, dongMatched: !!closed.rm.dong } : null,
-      detail: `${closed.type} ${a.DTL_SALS_STTS_NM || '미확인'} — ${a.BPLC_NM} (영업 중인 동일 상호 없음)`,
+      bcRegion,
+      licenseMatch,
+      detail: `${closed.type} ${a.DTL_SALS_STTS_NM || '미확인'} — ${a.BPLC_NM} (영업 중인 동일 사업체 없음)`,
+    };
+  }
+  if (topAny && (topAny.confidence === 'MEDIUM' || topAny.confidence === 'LOW')) {
+    return {
+      hasLicense: false,
+      licenseType: null,
+      licenseStatus: '추가 확인 필요',
+      licenseDate: null,
+      expiryDate: null,
+      address: null,
+      bcRegion,
+      licenseMatch,
+      needsReview: true,
+      detail: `동일 사업체 여부를 추가로 확인해야 합니다 (유사 후보 ${ranked.length}건, 최고 ${topAny.matchScore}점 ${topAny.confidence})`,
     };
   }
 
@@ -300,7 +311,8 @@ async function getLicenseLive(storeName, address, businessNumber) {
     expiryDate: null,
     address: null,
     bcRegion: bcRegion ? { ...bcRegion, matched: false, dongMatched: false } : null,
-    detail: `행정인허가 조회 결과 없음 (인허가 불필요 업종이거나 미취득${failed.length ? ` · ${failed.join('·')} API 응답 없음` : ''})`,
+    licenseMatch: { ...licenseMatch, confidence: 'NONE', candidates: [] },
+    detail: `공개된 인허가 데이터에서 일치하는 정보를 확인하지 못했습니다${failed.length ? ` (${failed.join('·')} API 응답 없음)` : ''}`,
   };
 }
 

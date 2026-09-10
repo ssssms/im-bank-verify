@@ -161,7 +161,7 @@ function getBcSales(businessNumber) {
     const v = merchant.monthly[ym] || {};
     return { ym, sales: v.sales || 0, txCount: v.txCount || 0, activeDays: v.activeDays || 0, uniqueCustomers: v.uniqueCustomers || 0, cardCount: v.cardCount || 0 };
   });
-  const active = monthly.filter(m => m.sales > 0);
+  const active = monthly.filter(m => m.sales > 0 || m.txCount > 0); // 순매출 음수(환불 초과) 달도 결제가 있으면 영업한 달
   const hasData = active.length > 0;
 
   const avgSales = gt0(snap.SC130003) ? snap.SC130003 : (active.length ? active.reduce((a, m) => a + m.sales, 0) / active.length : 0);

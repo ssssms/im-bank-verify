@@ -20,7 +20,8 @@ const { calcBusinessYears } = require('./businessAge');
 
 function countSalesMonths(sales) {
   const monthly = Array.isArray(sales?.monthly) ? sales.monthly : [];
-  return monthly.filter(m => (m.sales || 0) > 0).length;
+  // [2026-09-11] 순매출 > 0 또는 결제 건수 > 0 이면 매출 발생 달 (환불 초과로 순매출이 음수인 달도 영업한 달)
+  return monthly.filter(m => (m.sales || 0) > 0 || (m.txCount || 0) > 0).length;
 }
 
 /**

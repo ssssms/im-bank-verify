@@ -13,7 +13,8 @@ function monthsAgo(n) {
 }
 function monthly(activeCount, total = 6) {
   return Array.from({ length: total }, (_, i) => ({
-    ym: `2026-0${i + 1}`, sales: i < total - activeCount ? 0 : 1000000, txCount: 20, activeDays: 12, uniqueCustomers: 10,
+    // 매출 없는 달은 결제 건수도 0 — 2026-09-11 부터 「순매출 > 0 또는 결제 > 0」이면 매출 발생 달로 센다
+    ym: `2026-0${i + 1}`, sales: i < total - activeCount ? 0 : 1000000, txCount: i < total - activeCount ? 0 : 20, activeDays: 12, uniqueCustomers: 10,
   }));
 }
 const salesOk = { hasData: true, merchantRegistered: true, monthly: monthly(6) };

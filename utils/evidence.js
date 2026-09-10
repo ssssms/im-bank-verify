@@ -108,15 +108,18 @@ function evidenceLicense(r) {
     if (ym(r.licenseDate)) parts.push(`허가 ${ym(r.licenseDate)}`);
     if (r.licenseStatus) parts.push(`상태 ${r.licenseStatus}`);
     lines.push(parts.join(' · '));
+  } else if (r.needsReview) {
+    lines.push(`행안부: 유사 후보 ${r.licenseMatch?.candidates?.length || 0}건, 동일 사업체 확인 필요`);
   } else {
-    lines.push(`행안부: 인허가 조회 결과 없음${r.licenseStatus ? ` (${r.licenseStatus})` : ''}`);
+    lines.push('행안부: 공개 인허가 데이터에서 일치 정보 없음');
   }
   if (r.address) lines.push(`행안부: 소재지 ${r.address}`);
   if (r.expiryDate && ym(r.expiryDate)) lines.push(`행안부: 폐업·말소 ${ym(r.expiryDate)}`);
-  // BC 가맹점 등록 지역 대조 (BC 샘플 번호만) — 인허가 원장엔 사업자번호가 없어 지역이 동명 다른 가게를 거르는 근거 (2026-09-11)
-  if (r.bcRegion && r.licenseType) {
-    const b = r.bcRegion;
-    lines.push(`BC 등록 주소: ${[b.sido, b.sigungu, b.dong].filter(Boolean).join(' ')}, ${b.matched ? (b.dongMatched ? '행정동까지 일치' : '시군구 일치') : '불일치'}`);
+  // 사업체 특정 근거 (2026-09-11): 매칭 점수·등급 + 근거 (인허가 원장엔 사업자번호가 없어 상호·주소·상태로 판정)
+  if (r.licenseMatch && r.licenseMatch.candidates?.length) {
+    const m = r.licenseMatch;
+    const conf = ({ EXACT: '확정', HIGH: '높음', MEDIUM: '추가 확인', LOW: '낮음', NONE: '없음' })[m.confidence] || m.confidence;
+    lines.push(`매칭 ${m.score}/100 ${conf}: ${[...(m.reasons || []), ...(m.misses || [])].slice(0, 4).join(' · ')}`);
   }
   return lines.slice(0, 3);
 }
@@ -132,7 +135,7 @@ function evidenceSales(r) {
     return lines;
   }
   const monthly = Array.isArray(r.monthly) ? r.monthly : [];
-  const active = monthly.filter(m => (m.sales || 0) > 0);
+  const active = monthly.filter(m => (m.sales || 0) > 0 || (m.txCount || 0) > 0); // fdsEngine·eligibility 와 같은 기준
   const avg = (arr, k) => (arr.length ? arr.reduce((a, m) => a + (m[k] || 0), 0) / arr.length : 0);
   const total = monthly.length || 6;
   lines.push(`BC: 최근 ${total}개월 매출 발생 ${active.length}/${total}개월 · 월평균 ${Math.round(avg(active, 'txCount'))}건 · 순고객 ${Math.round(avg(active, 'uniqueCustomers'))}명`);

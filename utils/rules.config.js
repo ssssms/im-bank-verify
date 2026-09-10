@@ -62,7 +62,10 @@ const DEFAULTS = {
     VOLUME_TX: [[30, 5], [15, 3], [5, 1]], // 월평균 매출건수 → 최대 5  (만점선 TX_MIN)
     VOLUME_INDUSTRY: {                     // 업종 평균 대비 비율 → 최대 5
       NORMAL_MIN: 0.7, NORMAL_MAX: 1.5, NORMAL_PT: 5, // 정상 범위
-      EXCESS: 2.5, EXCESS_PT: 1,                      // 과대(가장매출 의심)
+      // [2026-09-11] BC 실데이터에서 건강한 매장 5곳이 업종평균 3~4배(BC 는 정수 배수로 제공)라 「과대=가장매출 의심」 1점에 걸렸다.
+      //   과대 감점은 직전 달 급증(ANOMALY.SPIKE_RATIO)이 같이 있을 때만. 급증 없이 업종을 상회하면 실적 우수로 보고 ABOVE_PT.
+      EXCESS: 2.5, EXCESS_PT: 1,                      // 과대 + 급증 → 가장매출 의심
+      ABOVE_PT: 4,                                     // 업종 상회(NORMAL_MAX 초과), 급증 없음
       LOW: 0.4, LOW_PT: 3,
       VERY_LOW: 0.2, VERY_LOW_PT: 1,
     },

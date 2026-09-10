@@ -89,15 +89,18 @@ function calcLocationScore(locationResult, licenseResult) {
 
 // ── 3단계: 행정인허가 (20점) ──────────────────────────────────
 function calcLicenseScore(licenseResult) {
+  // licenseMatch(사업체 특정 결과: score·confidence·reasons·candidates) 는 세부내용 화면 「인허가 사업체 매칭」 패널용으로 그대로 싣는다 (2026-09-11)
+  const licenseMatch = licenseResult?.licenseMatch || null;
   if (!licenseResult || !licenseResult.hasLicense) {
-    const detail = licenseResult?.detail || '행정인허가 조회 결과 없음';
+    const detail = licenseResult?.detail || '공개된 인허가 데이터에서 일치하는 정보를 확인하지 못했습니다';
     const isClosed = licenseResult?.licenseStatus === '폐업';
-    return { score: 0, detail, passed: false, warned: !isClosed };
+    return { score: 0, detail, passed: false, warned: !isClosed, needsReview: !!licenseResult?.needsReview, ...(licenseMatch ? { licenseMatch } : {}) };
   }
   return {
     score: 20,
     detail: licenseResult.detail || `${licenseResult.licenseType} 영업허가 유효`,
     passed: true,
+    ...(licenseMatch ? { licenseMatch } : {}),
   };
 }
 
