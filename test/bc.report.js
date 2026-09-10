@@ -75,7 +75,7 @@ async function run() {
         fdsDetail: fds.detail,
         ms: body.totalElapsedMs ?? (Date.now() - t0),
       });
-      fs.writeFileSync(path.join(RESULTS_DIR, `${num.slice(0, 3)}_masked.json`), JSON.stringify(body, null, 2), 'utf8');
+      fs.writeFileSync(path.join(RESULTS_DIR, `${num.slice(0, 3)}_${num.slice(-2)}_masked.json`), JSON.stringify(body, null, 2), 'utf8');
     }
   } finally {
     server.close();
