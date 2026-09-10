@@ -187,7 +187,7 @@ async function getLicenseLive(storeName, address, businessNumber) {
   if (!serviceKey) throw new Error('LICENSE_API_KEY 미설정');
 
   const region = getMerchantRegion(businessNumber);
-  const LICENSE_TIMEOUT = 6000; // 건강한 업종 API 는 0.1~3초. 미용업처럼 무응답인 API 가 전체를 끌지 않게 상한
+  const LICENSE_TIMEOUT = 10000; // data.go.kr 응답 편차(일반음식점 1.4~9.6초 실측) 반영. 확정 후보가 나오면 조기 종료하므로 보통 2~4초
 
   // API 는 perPage 를 얼마로 주든 최대 10건만 준다(실측). 동명이 많은 상호(「오군」 40건)는 뒤 페이지에 진짜 매장이 있으므로
   // totalCount 만큼(최대 MAX_PAGES 페이지) 이어 받는다. 첫 페이지 뒤의 페이지는 동시에 요청.
@@ -232,13 +232,29 @@ async function getLicenseLive(storeName, address, businessNumber) {
   const candidates = [];
   const failed = [];      // 응답 없음(타임아웃·네트워크) — 조회 결과 없음 detail 에 표기
   const unavailable = []; // HTTP 오류(403 미승인·400 등) — 활용신청 전 업종. 로그만 남기고 detail 엔 안 쓴다
+  // 조기 종료(2026-09-11): 어느 업종 API 에서든 영업 중 + EXACT 후보가 오면 남은 API 응답을 기다리지 않는다.
+  //   data.go.kr 응답이 1.4~9.6초로 들쭉날쭉해(일반음식점) 타임아웃을 10초로 두되, 확정이 나오면 그 시점에 끝낸다.
+  const settleWithEarlyExit = promises => new Promise(resolve => {
+    const states = promises.map(() => ({ status: 'pending' }));
+    let left = promises.length;
+    const finish = () => resolve(states);
+    promises.forEach((p, i) => {
+      p.then(value => {
+        states[i] = { status: 'fulfilled', value };
+        const hit = rankCandidates(value, { storeName, region, address: address || null }).find(c => c.active && c.confidence === 'EXACT');
+        if (hit) finish();
+      }).catch(reason => { states[i] = { status: 'rejected', reason }; })
+        .finally(() => { if (--left === 0) finish(); });
+    });
+  });
   for (const query of queryVariants) {
-    const settled = await Promise.allSettled(DATA_GO_KR_LICENSE_APIS.map(ep => fetchOne(ep, query)));
+    const settled = await settleWithEarlyExit(DATA_GO_KR_LICENSE_APIS.map(ep => fetchOne(ep, query)));
     failed.length = 0; unavailable.length = 0;
     settled.forEach((s, i) => {
       if (s.status === 'fulfilled') candidates.push(...s.value);
-      else if (s.reason?.response) unavailable.push(`${DATA_GO_KR_LICENSE_APIS[i].name}(${s.reason.response.status})`);
-      else failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
+      else if (s.status === 'rejected' && s.reason?.response) unavailable.push(`${DATA_GO_KR_LICENSE_APIS[i].name}(${s.reason.response.status})`);
+      else if (s.status === 'rejected') failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
+      // pending = 확정 후보가 먼저 나와 기다리지 않은 API
     });
     if (candidates.length) break;
   }
