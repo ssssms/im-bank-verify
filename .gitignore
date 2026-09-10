@@ -2,3 +2,8 @@ node_modules/
 .env
 *.log
 test/results/
+
+# BC카드 실데이터 샘플 평문·원본 (실제 가맹점 정보 — 절대 커밋 금지)
+# data/bc_sample.enc(AES-256-GCM 암호화본)만 커밋한다. 키는 .env / Render 환경변수 BC_SAMPLE_KEY
+data/bc_sample.json
+data/*.xlsx

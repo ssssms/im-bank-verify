@@ -15,6 +15,28 @@
  */
 
 const axios = require('axios');
+const { getMerchantRegion } = require('./bcData.service'); // BC 가맹점 등록 주소(시도·시군구·행정동) — 샘플에 없으면 null (2026-09-10)
+
+// ── 상호 정규화·유사도 (2026-09-10) ───────────────────────────
+//   normalizeName : 공백·괄호·특수문자 제거, 소문자
+//   nameSimilar   : 완전 일치 → 2점, 한쪽이 다른 쪽을 포함(짧은 쪽 3글자 이상) → 1점, 그 외 0
+//   ※ 종전 「양방향 includes」는 상호가 한 글자인 가게(「나」)가 「나살던고향」과 일치로 잡혔다.
+const normalizeName = s => String(s || '').replace(/<[^>]+>/g, '').replace(/[\s\(\)（）\[\]·\-_,.&'"]/g, '').toLowerCase();
+function nameSimilar(a, b) {
+  const x = normalizeName(a), y = normalizeName(b);
+  if (!x || !y) return 0;
+  if (x === y) return 2;
+  const short = x.length <= y.length ? x : y, long = x.length <= y.length ? y : x;
+  return short.length >= 3 && long.includes(short) ? 1 : 0;
+}
+// 주소가 BC 가맹점 등록 지역(시군구·행정동)과 맞는가 → { sigungu, dong }
+function regionMatch(address, region) {
+  if (!region || !address) return { sigungu: false, dong: false };
+  const addr = String(address);
+  const sigungu = !!region.sigungu && addr.includes(region.sigungu);
+  const dong = !!region.dong && addr.includes(region.dong.replace(/\d+동$/, '')); // '서초2동' 은 도로명 주소에 '서초' 로만 나올 수 있다
+  return { sigungu, dong };
+}
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
 const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
@@ -30,25 +52,50 @@ const MOCK_LOCATION_DATA = {
 };
 
 // ── 1차: 네이버 지역 검색 (한국 사업장 DB, 이름 변형 처리 우수) ──
-async function searchByKeyword(storeName) {
+async function searchByKeyword(storeName, region = null) {
   const clientId     = process.env.NAVER_CLIENT_ID;
   const clientSecret = process.env.NAVER_CLIENT_SECRET;
   if (!clientId || !clientSecret) throw new Error('NAVER_CLIENT_ID/SECRET 미설정');
 
-  const response = await axios.get('https://openapi.naver.com/v1/search/local.json', {
-    params: { query: storeName, display: 5 },
-    headers: {
-      'X-Naver-Client-Id': clientId,
-      'X-Naver-Client-Secret': clientSecret,
-    },
+  const call = q => axios.get('https://openapi.naver.com/v1/search/local.json', {
+    params: { query: q, display: 5 },
+    headers: { 'X-Naver-Client-Id': clientId, 'X-Naver-Client-Secret': clientSecret },
     timeout: 6000,
-  });
+  }).then(r => r.data?.items || []);
 
-  const items = response.data?.items;
-  if (!items || items.length === 0) return null;
+  // [2026-09-10] 종전엔 상호만 검색해 첫 번째 결과를 그대로 썼다(「초이커피숍」→「초이커피 신길점」).
+  // BC 등록 지역이 있으면 검색어를 바꿔 가며(시군구+상호 → 시도+시군구+상호 → 접미사 뗀 상호 → 상호만) 같은 지역 후보를 찾고,
+  // 후보 5개를 상호 유사도(0~2) + 지역 일치(시군구 +2 · 행정동 +1) 로 점수 매겨 가장 높은 것을 고른다. 동점이면 네이버 순서.
+  // 실측: 「중구 초이커피숍」 0건 → 「서울 중구 초이커피」 가 중구 통일로 10(행안부 소재지와 같은 곳)을 찾는다.
+  const sidoShort = (region?.sido || '').replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, '');
+  const bare = storeName.replace(/\s*\(.*\)\s*$/, '').replace(/(커피숍|커피샵|뷰티샵|뷰티숍|헤어샵|헤어숍|숍|샵|점|집|카페)$/, '').trim();
+  const queries = [];
+  const push = q => { if (q && !queries.includes(q)) queries.push(q); };
+  if (region?.sigungu) {
+    push(`${region.sigungu} ${storeName}`);
+    push(`${sidoShort} ${region.sigungu} ${storeName}`.trim());
+    if (bare && bare !== storeName && bare.length >= 2) push(`${sidoShort} ${region.sigungu} ${bare}`.trim());
+  }
+  push(storeName);
+
+  const scoreItems = items => items.map((it, i) => {
+    const rm = regionMatch(`${it.roadAddress || ''} ${it.address || ''}`, region);
+    return { it, i, score: nameSimilar(it.title, storeName) + (rm.sigungu ? 2 : 0) + (rm.dong ? 1 : 0), rm };
+  }).sort((a, b) => b.score - a.score || a.i - b.i);
+
+  let scored = null; // 지역 일치 후보가 나오면 그 즉시 채택, 아니면 처음 나온 결과를 유지
+  for (const q of queries) {
+    const items = await call(q);
+    if (!items.length) continue;
+    const s = scoreItems(items);
+    if (!scored) scored = s;
+    if (s[0].rm.sigungu) { scored = s; break; }
+    if (!region) break; // 지역 정보가 없으면 첫 결과로 끝
+  }
+  if (!scored) return null;
+  const best = scored[0].it;
 
   // 네이버 좌표는 KATEC 형식 → WGS84 변환 (간이 변환)
-  const best = items[0];
   const longitude = parseInt(best.mapx) / 10000000;
   const latitude  = parseInt(best.mapy) / 10000000;
 
@@ -59,17 +106,22 @@ async function searchByKeyword(storeName) {
     jibunAddress: best.address || '',               // 지번 주소 (건축물대장 조회용)
     matchedName: best.title.replace(/<[^>]+>/g, ''), // HTML 태그 제거
     category: best.category,
+    regionMatched: scored[0].rm.sigungu,             // BC 등록 시군구와 일치
+    regionMatchedDong: scored[0].rm.dong,
+    candidates: scored.length,
   };
 }
 
 // ── 2차: 상권정보 API 반경 내 상호 확인 ───────────────────────
-async function verifyInSbiz(latitude, longitude, storeName, radiusMeters = 500) {
+// [2026-09-10] 종전 반경 500m · 10건: 도심은 반경 안 상가가 900~4,500곳인데 10곳만 받아 비교했으니 사실상 항상 실패(12점).
+//   실측(스크래치 sbiz_probe): 반경 100m · 1,000건이면 0.1~0.4초에 전부 받고 오군·호텔스타가 바로 일치.
+async function verifyInSbiz(latitude, longitude, storeName, radiusMeters = 100) {
   const serviceKey = process.env.SBIZ_API_KEY;
   if (!serviceKey || serviceKey.startsWith('your_')) return { found: false };
 
   // serviceKey는 반드시 encodeURIComponent 적용 (미적용 시 타임아웃 발생)
   const url = `https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInRadius`
-    + `?serviceKey=${encodeURIComponent(serviceKey)}&pageNo=1&numOfRows=10`
+    + `?serviceKey=${encodeURIComponent(serviceKey)}&pageNo=1&numOfRows=1000`
     + `&radius=${radiusMeters}&cx=${longitude}&cy=${latitude}&type=json`;
 
   const response = await axios.get(url, { timeout: 20000 });
@@ -77,14 +129,9 @@ async function verifyInSbiz(latitude, longitude, storeName, radiusMeters = 500) 
   const items = response.data?.body?.items || [];
   if (items.length === 0) return { found: false };
 
-  // 상호명 유사도 매칭
-  const normalize = str => str.replace(/[\s\(\)（）]/g, '').toLowerCase();
-  const target = normalize(storeName);
-
-  const match = items.find(item => {
-    const name = normalize(item.bizesNm || '');
-    return name.includes(target) || target.includes(name);
-  });
+  // 상호명 유사도 매칭 — 완전 일치 우선, 그다음 포함(짧은 쪽 3글자 이상)
+  const exact = items.find(item => nameSimilar(item.bizesNm, storeName) === 2);
+  const match = exact || items.find(item => nameSimilar(item.bizesNm, storeName) >= 1);
 
   return {
     found: !!match,
@@ -101,9 +148,12 @@ async function verifyLocationLive(businessNumber, storeName) {
   let step1Result = null;
   let step2Result = null;
 
-  // 1차: Nominatim 키워드 검색
+  // BC 가맹점 등록 주소(시도·시군구·행정동) — 샘플에 있는 번호만. 네이버 후보 선택 + 두 번째 교차 근거로 쓴다 (2026-09-10)
+  const region = getMerchantRegion(businessNumber);
+
+  // 1차: 네이버 지역 검색
   try {
-    step1Result = await searchByKeyword(storeName);
+    step1Result = await searchByKeyword(storeName, region);
   } catch (e) {
     console.warn('[위치검증 1차 실패]', e.message);
   }
@@ -117,22 +167,28 @@ async function verifyLocationLive(businessNumber, storeName) {
     }
   }
 
-  // 교차검증 결과 판정
+  // 교차검증 결과 판정 — 두 번째 근거는 소진공 반경 일치 또는 BC 가맹점 등록 주소(시군구) 일치
   const step1Pass = !!step1Result;
   const step2Pass = step2Result?.found === true;
+  const bcAddress = region && step1Result
+    ? { sido: region.sido, sigungu: region.sigungu, dong: region.dong, matched: !!step1Result.regionMatched, dongMatched: !!step1Result.regionMatchedDong }
+    : null;
+  const bcPass = bcAddress?.matched === true;
 
-  if (step1Pass && step2Pass) {
+  if (step1Pass && (step2Pass || bcPass)) {
+    const sources = [step2Pass ? `상권정보 DB(반경 내 ${step2Result.totalNearby}개 상가 중 확인)` : null, bcPass ? 'BC 가맹점 등록 주소' : null].filter(Boolean);
     return {
       matched: true,
       confidence: 'HIGH',
-      address: step2Result.matchedAddress || step1Result.address,
+      address: (step2Pass && step2Result.matchedAddress) || step1Result.address,
       jibunAddress: step1Result.jibunAddress || '',
       latitude: step1Result.latitude,
       longitude: step1Result.longitude,
-      matchedStoreName: step1Result.matchedName || step2Result.matchedName || storeName,
+      matchedStoreName: step1Result.matchedName || step2Result?.matchedName || storeName,
       step1: true,
-      step2: true,
-      detail: `네이버 + 상권정보 DB 교차검증 완료 (반경 내 ${step2Result.totalNearby}개 상가 중 확인)`,
+      step2: step2Pass,
+      bcAddress,
+      detail: `네이버 + ${sources.join(' + ')} 교차검증 완료`,
     };
   } else if (step1Pass) {
     return {
@@ -145,7 +201,8 @@ async function verifyLocationLive(businessNumber, storeName) {
       matchedStoreName: step1Result.matchedName || storeName,
       step1: true,
       step2: false,
-      detail: `네이버 위치 확인 완료 · ${step1Result.matchedName || storeName} (${step1Result.category || ''})`,
+      bcAddress,
+      detail: `네이버 위치 확인 완료 · ${step1Result.matchedName || storeName} (${step1Result.category || ''})${bcAddress ? ' · BC 등록 지역과 불일치' : ''}`,
     };
   } else {
     return {

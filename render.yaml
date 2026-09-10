@@ -1,0 +1,43 @@
+# Render 배포 설정 (Blueprint) — 2026-09-11 싱가포르 리전 이전
+# 사용법: 옛 서비스(im-bank-verify, 오리건)를 먼저 삭제 → Render 대시보드 New → Blueprint → 이 저장소(ssssms/im-bank-verify) 연결
+#         → 아래 sync:false 변수들의 값을 입력하면 같은 이름·같은 주소(https://im-bank-verify.onrender.com)로 싱가포르에 생성된다.
+# ★ 서비스 이름 변경으로는 주소가 안 바뀌고 리전도 못 바꾼다. 반드시 삭제 후 재생성(다운타임 몇 분, 시연·업무 시간 피해서).
+services:
+  - type: web
+    name: im-bank-verify
+    runtime: node
+    plan: free
+    region: singapore   # 2026-09-10 실측: 오리건 기준 왕복 0.35초(국내 정상 0.05초). 실적관리(im-performance)도 싱가포르로 옮겨 대시보드 7→1.4초
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: USE_MOCK
+        value: "false"          # 실번호는 Live API, 시연 번호 5개는 항상 Mock
+      - key: ADMIN_ENABLED
+        value: "true"           # #admin 룰 조정 패널
+      - key: RATE_LIMIT_MAX
+        value: "30"
+      # ── 아래는 비밀값: 대시보드에서 입력 (로컬 backend/.env 와 같은 값) ──
+      - key: NTS_API_KEY        # 국세청 사업자상태 (data.go.kr)
+        sync: false
+      - key: NAVER_CLIENT_ID    # 네이버 지역검색 (위치 1차)
+        sync: false
+      - key: NAVER_CLIENT_SECRET
+        sync: false
+      - key: SBIZ_API_KEY       # 소상공인진흥공단 상권정보 (위치 2차)
+        sync: false
+      - key: LICENSE_API_KEY    # 행안부 지방행정인허가 (data.go.kr)
+        sync: false
+      - key: MOLIT_API_KEY      # 건축물대장 (deprecated 단계용, 코드에 남아 있어 유지)
+        sync: false
+      - key: NPS_API_KEY        # 국민연금 (deprecated 단계용, 유지)
+        sync: false
+      - key: BIZNO_API_KEY      # 비즈노 상호명 조회 (없으면 상호 미확인으로 동작)
+        sync: false
+      - key: ADMIN_TOKEN        # #admin 패널 토큰
+        sync: false
+      - key: BC_SAMPLE_KEY      # BC 실데이터 암호화본(data/bc_sample.enc) 복호화 키 — 없으면 BC 연동 비활성(가상 데이터)
+        sync: false

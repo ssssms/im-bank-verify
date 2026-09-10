@@ -41,6 +41,14 @@ const DEFAULTS = {
   // ── 무데이터 3분해: 개업 후 이 개월수 이내면 '진짜 신규(C)', 초과면 '카드 미가맹(A)' ──
   NO_DATA_NEW_BUSINESS_MONTHS: 12,
 
+  // ── BC카드 실데이터 샘플 → 게이트 WATCH 알람 파생 임계값 (services/bcData.service.js, 2026-09-10) ──
+  //   최근6개월 취소매출비율(SC240003) · 카드거래건수 대비 거절건수비율(SC380003) 이 이 값 이상이면
+  //   negativeGate 의 highCancelRatio / highDeclineRatio (WATCH — 판정 불변, 사유만 표시)
+  BC: {
+    CANCEL_RATIO_WATCH:  0.10,
+    DECLINE_RATIO_WATCH: 0.10,
+  },
+
   // ── FDS 40점 채점 임계값 (utils/fdsEngine.js) ─────────────
   // tier 표는 [임계값, 점수] 를 위에서부터 탐색한다 (value >= 임계값 이면 그 점수).
   FDS: {

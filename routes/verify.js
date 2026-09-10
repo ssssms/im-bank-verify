@@ -19,6 +19,7 @@ const { verifyLocation }      = require('../services/mockLocation.service');
 const { getLicenseInfo }      = require('../services/mockLicense.service');
 const { getSalesData }        = require('../services/mockSales.service');
 const { getCompanyName }      = require('../services/bizno.service'); // 상호명 병렬 보완(참고용)
+const { getMerchantName, listSamples, isEnabled: bcEnabled } = require('../services/bcData.service'); // BC 실데이터 샘플 (상호명 폴백·시연 목록)
 // 홈택스(5단계) 제거 — 4단계 모델. mockHometax.service.js는 롤백 대비 보존, import 안 함.
 const { calculateTrustScore, calcStepScore } = require('../utils/scoreEngine');
 const { stepMeta, decorateBreakdown } = require('../utils/evidence'); // 조회 근거·출처 라벨·소요시간
@@ -49,19 +50,26 @@ router.get('/lookup', async (req, res) => {
       checkBusinessStatus(validation.cleaned),
       getCompanyName(validation.cleaned),
     ]);
-    // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → ''
-    const companyName = biznoResult.companyName || ntsResult.companyName || '';
+    // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → BC 샘플 가맹점명 → ''
+    const bcName = getMerchantName(validation.cleaned);
+    const companyName = biznoResult.companyName || ntsResult.companyName || bcName || '';
     return res.json({
       found: ntsResult.businessStatus === 'ACTIVE',
       businessStatus: ntsResult.businessStatus,
       businessStatusText: ntsResult.businessStatusText || '',
       companyName,
-      companyNameSource: biznoResult.found ? 'BIZNO' : (ntsResult.companyName ? 'NTS' : 'NONE'),
+      companyNameSource: biznoResult.found ? 'BIZNO' : (ntsResult.companyName ? 'NTS' : bcName ? 'BC_SAMPLE' : 'NONE'),
       businessType: ntsResult.businessType || '',
     });
   } catch {
     return res.json({ found: false });
   }
+});
+
+// ── BC카드 실데이터 샘플 목록 (시연 선택용 — 마스킹 번호·지역·가맹 기간만, 상호명 없음) ──
+router.get('/bc-samples', (req, res) => {
+  const s = bcEnabled() ? listSamples() : {};
+  return res.json({ enabled: bcEnabled(), asOf: s.asOf || null, items: s.items || [] });
 });
 
 // ── 상호명 자동완성 (인허가 API 검색) ─────────────────────────
@@ -179,7 +187,7 @@ router.post('/business', async (req, res) => {
 
     // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → 없으면 '' (프론트에서 '상호명 미확인')
     const biznoResult = await companyNamePromise;
-    const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
+    const resolvedName = biznoResult.companyName || ntsResult.companyName || getMerchantName(cleanBizNum) || '';
 
     return res.json({
       success: true,
@@ -246,7 +254,7 @@ router.get('/stream', async (req, res) => {
       }), { 1: ntsResult }, ctx, elapsed);
       // 휴/폐업이어도 상호명(참고용)은 표시. 판정은 국세청 기준 그대로.
       const biznoResult = await companyNamePromise;
-      const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
+      const resolvedName = biznoResult.companyName || ntsResult.companyName || getMerchantName(cleanBizNum) || '';
       send('done', { trustScore, companyName: resolvedName, totalElapsedMs: Date.now() - t0 });
       return res.end();
     }
@@ -314,7 +322,7 @@ router.get('/stream', async (req, res) => {
     }), results, ctx, elapsed);
     // 상호명: 비즈노(민간 DB) 우선 → 국세청 Mock 상호(시연) → 없으면 '' (프론트 '상호명 미확인')
     const biznoResult = await companyNamePromise;
-    const resolvedName = biznoResult.companyName || ntsResult.companyName || '';
+    const resolvedName = biznoResult.companyName || ntsResult.companyName || getMerchantName(cleanBizNum) || '';
     send('done', { trustScore, companyName: resolvedName, totalElapsedMs: Date.now() - t0 });
 
   } catch (err) {

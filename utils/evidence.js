@@ -89,6 +89,12 @@ function evidenceLocation(r) {
       ? `소진공: ${name || '상권정보'}, 반경 내 일치`
       : `소진공: ${name || '상권정보'}, 미등록`);
   }
+  // BC 가맹점 등록 주소 대조 (BC 샘플 번호만) — 2026-09-10
+  if (r.bcAddress) {
+    const b = r.bcAddress;
+    const where = [b.sido, b.sigungu, b.dong].filter(Boolean).join(' ');
+    lines.push(`BC 등록 주소: ${where}, ${b.matched ? (b.dongMatched ? '행정동까지 일치' : '시군구 일치') : '불일치'}`);
+  }
   if (r.confidence) lines.push(`교차검증 신뢰도: ${({ HIGH: '높음(2개 소스)', MEDIUM: '보통(1개 소스)', NONE: '없음' })[r.confidence] || r.confidence}`);
   return lines.slice(0, 3);
 }
@@ -132,6 +138,15 @@ function evidenceSales(r) {
   }
   const alarmKeys = Object.keys(r.alarms || {}).filter(k => r.alarms[k]);
   if (alarmKeys.length) lines.push(`BC 알람: ${alarmKeys.length}건 (${alarmKeys.map(alarmLabel).join(', ')})`);
+  // BC 실데이터 샘플이면 배치 기준·가맹 기간·6개월 순고객·취소 비율 한 줄 (알람 줄이 있으면 3줄 제한에 밀린다)
+  if (r.dataSource === 'BC_SAMPLE' && r.bc && !r.bc.alarmOnly) {
+    const b = r.bc;
+    const parts = [`BC 배치 ${String(b.asOf || '').replace('-', '.')} 기준`];
+    if (typeof b.joinMonths === 'number') parts.push(`가맹 ${b.joinMonths}개월`);
+    if (typeof b.uniqueCustomers6m === 'number') parts.push(`6개월 순고객 ${b.uniqueCustomers6m.toLocaleString()}명`);
+    if (typeof b.cancelRatio === 'number') parts.push(`취소 ${(b.cancelRatio * 100).toFixed(1)}%`);
+    lines.push(parts.join(' · '));
+  }
   return lines.slice(0, 3);
 }
 

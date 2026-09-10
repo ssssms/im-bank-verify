@@ -11,6 +11,7 @@
  */
 
 const axios = require('axios');
+const { getBcSales } = require('./bcData.service'); // BC카드 실데이터 샘플 (2026-09-10, 파일 없으면 항상 null)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
 const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
@@ -277,6 +278,13 @@ function withSummaryFields(result) {
 // ── 외부 노출 함수 ────────────────────────────────────────────
 async function getSalesData(businessNumber, storeName) {
   await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 300));
+
+  // [2026-09-10] BC카드 실데이터 샘플 — 시연 번호가 아니고 샘플에 있는 번호면 실데이터를 돌려준다.
+  // 시연 번호 5개와 아래 Mock 로직은 무수정(CLAUDE.md 규칙). 샘플 파일이 없으면 getBcSales 는 항상 null.
+  if (!DEMO_NUMBERS.has(businessNumber)) {
+    const bc = getBcSales(businessNumber);
+    if (bc) return { ...withSummaryFields(bc), dataSource: 'BC_SAMPLE' };
+  }
 
   // 금융활동(카드매출/전자세금계산서)은 카드사 제휴 전용 — 공공 API 없음
   // 항상 Mock 사용
