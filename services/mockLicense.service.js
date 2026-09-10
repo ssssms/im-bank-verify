@@ -196,11 +196,11 @@ async function getLicenseLive(storeName, address, businessNumber) {
   const regionCond = region?.sido && region?.sigungu
     ? `&cond%5BROAD_NM_ADDR%3A%3ALIKE%5D=${encodeURIComponent(`${region.sido} ${region.sigungu}`)}`
     : '';
-  const getPage = async (path, page) => {
+  const getPage = async (path, page, query = storeName) => {
     const url = `https://apis.data.go.kr${path}`
       + `?serviceKey=${encodeURIComponent(serviceKey)}`
       + `&perPage=${PAGE_SIZE}&page=${page}&returnType=json`
-      + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(storeName)}`
+      + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(query)}`
       + regionCond;
     let res;
     try {
@@ -214,24 +214,33 @@ async function getLicenseLive(storeName, address, businessNumber) {
     const items = body.items?.item;
     return { list: items ? (Array.isArray(items) ? items : [items]) : [], total: Number(body.totalCount) || 0 };
   };
-  const fetchOne = async ({ url: path, name }) => {
-    const first = await getPage(path, 1);
+  const fetchOne = async ({ url: path, name }, query) => {
+    const first = await getPage(path, 1, query);
     const pages = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE));
     const rest = pages > 1
-      ? (await Promise.allSettled(Array.from({ length: pages - 1 }, (_, i) => getPage(path, i + 2)))).flatMap(r => (r.status === 'fulfilled' ? r.value.list : []))
+      ? (await Promise.allSettled(Array.from({ length: pages - 1 }, (_, i) => getPage(path, i + 2, query)))).flatMap(r => (r.status === 'fulfilled' ? r.value.list : []))
       : [];
     return [...first.list, ...rest].map(item => ({ item, type: name }));
   };
 
-  const settled = await Promise.allSettled(DATA_GO_KR_LICENSE_APIS.map(fetchOne));
+  // 검색어 변형 라운드(2026-09-11): 원장 상호는 「알에스다나재활의학과의원」인데 입력이 「알에스 (RS)다나재활의학과의원」이면 LIKE 가 0건.
+  //   원문 → 괄호 병기 제거 → 공백까지 제거 순으로, 후보가 하나라도 나오면 멈춘다(보통 1라운드).
+  const noParen = storeName.replace(/[\(（][^\)）]*[\)）]/g, '').replace(/\s+/g, ' ').trim();
+  const queryVariants = [...new Set([storeName, noParen, noParen.replace(/\s+/g, '')].filter(q => q.length >= 2))];
+
   const candidates = [];
   const failed = [];      // 응답 없음(타임아웃·네트워크) — 조회 결과 없음 detail 에 표기
   const unavailable = []; // HTTP 오류(403 미승인·400 등) — 활용신청 전 업종. 로그만 남기고 detail 엔 안 쓴다
-  settled.forEach((s, i) => {
-    if (s.status === 'fulfilled') candidates.push(...s.value);
-    else if (s.reason?.response) unavailable.push(`${DATA_GO_KR_LICENSE_APIS[i].name}(${s.reason.response.status})`);
-    else failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
-  });
+  for (const query of queryVariants) {
+    const settled = await Promise.allSettled(DATA_GO_KR_LICENSE_APIS.map(ep => fetchOne(ep, query)));
+    failed.length = 0; unavailable.length = 0;
+    settled.forEach((s, i) => {
+      if (s.status === 'fulfilled') candidates.push(...s.value);
+      else if (s.reason?.response) unavailable.push(`${DATA_GO_KR_LICENSE_APIS[i].name}(${s.reason.response.status})`);
+      else failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
+    });
+    if (candidates.length) break;
+  }
   if (failed.length) console.warn(`[인허가] 응답 없음: ${failed.join(', ')}`);
   if (unavailable.length) console.warn(`[인허가] 미승인·오류 API 제외: ${unavailable.join(', ')}`);
 
