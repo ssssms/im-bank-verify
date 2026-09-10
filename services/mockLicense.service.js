@@ -122,6 +122,15 @@ const DATA_GO_KR_LICENSE_APIS = [
   { url: '/1741000/beauty_salons/info', name: '미용업' },
   { url: '/1741000/laundries/info', name: '세탁업' },
   { url: '/1741000/lodgings/info', name: '숙박업' },
+  // 2026-09-11 추가 — data.go.kr 활용신청(자동승인) 후 같은 인증키로 동작. 승인 전엔 403 → 조용히 제외
+  //   이용업      https://www.data.go.kr/data/15154922/openapi.do
+  //   체력단련장업 https://www.data.go.kr/data/15155077/openapi.do
+  //   의원        https://www.data.go.kr/data/15154874/openapi.do
+  //   병원        https://www.data.go.kr/data/15154458/openapi.do
+  { url: '/1741000/barber_shops/info', name: '이용업' },
+  { url: '/1741000/fitness_centers/info', name: '체력단련장업' },
+  { url: '/1741000/clinics/info', name: '의원' },
+  { url: '/1741000/hospitals/info', name: '병원' },
 ];
 
 // 주소에서 매칭용 키워드 추출 (구/동/로 단위)
@@ -204,12 +213,15 @@ async function getLicenseLive(storeName, address, businessNumber) {
 
   const settled = await Promise.allSettled(DATA_GO_KR_LICENSE_APIS.map(fetchOne));
   const candidates = [];
-  const failed = [];
+  const failed = [];      // 응답 없음(타임아웃·네트워크) — 조회 결과 없음 detail 에 표기
+  const unavailable = []; // HTTP 오류(403 미승인·400 등) — 활용신청 전 업종. 로그만 남기고 detail 엔 안 쓴다
   settled.forEach((s, i) => {
     if (s.status === 'fulfilled') candidates.push(...s.value);
+    else if (s.reason?.response) unavailable.push(`${DATA_GO_KR_LICENSE_APIS[i].name}(${s.reason.response.status})`);
     else failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
   });
-  if (failed.length) console.warn(`[인허가] 응답 없음·오류: ${failed.join(', ')}`);
+  if (failed.length) console.warn(`[인허가] 응답 없음: ${failed.join(', ')}`);
+  if (unavailable.length) console.warn(`[인허가] 미승인·오류 API 제외: ${unavailable.join(', ')}`);
 
   const scored = candidates.map(c => {
     const i = c.item;
