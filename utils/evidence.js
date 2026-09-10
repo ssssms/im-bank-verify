@@ -113,6 +113,11 @@ function evidenceLicense(r) {
   }
   if (r.address) lines.push(`행안부: 소재지 ${r.address}`);
   if (r.expiryDate && ym(r.expiryDate)) lines.push(`행안부: 폐업·말소 ${ym(r.expiryDate)}`);
+  // BC 가맹점 등록 지역 대조 (BC 샘플 번호만) — 인허가 원장엔 사업자번호가 없어 지역이 동명 다른 가게를 거르는 근거 (2026-09-11)
+  if (r.bcRegion && r.licenseType) {
+    const b = r.bcRegion;
+    lines.push(`BC 등록 주소: ${[b.sido, b.sigungu, b.dong].filter(Boolean).join(' ')}, ${b.matched ? (b.dongMatched ? '행정동까지 일치' : '시군구 일치') : '불일치'}`);
+  }
   return lines.slice(0, 3);
 }
 

@@ -16,6 +16,7 @@
  */
 
 const axios = require('axios');
+const { getMerchantRegion } = require('./bcData.service'); // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
 const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
@@ -117,7 +118,7 @@ const DATA_GO_KR_LICENSE_APIS = [
   { url: '/1741000/general_restaurants/info', name: '일반음식점' },
   { url: '/1741000/rest_cafes/info', name: '휴게음식점' },
   { url: '/1741000/bakeries/info', name: '제과점' },
-  // 승인 대기 중 (403 해제되면 자동 동작)
+  // 이용업(barber_shops)·체력단련장(fitness_centers)·병의원(hospitals·clinics)은 data.go.kr 활용신청 후 여기에 추가 (2026-09-11 확인: 403)
   { url: '/1741000/beauty_salons/info', name: '미용업' },
   { url: '/1741000/laundries/info', name: '세탁업' },
   { url: '/1741000/lodgings/info', name: '숙박업' },
@@ -139,76 +140,122 @@ function matchAddress(candidateAddr, referenceAddr) {
   return refKeys.filter(k => candAddr.includes(k)).length / refKeys.length;
 }
 
-async function getLicenseLive(storeName, address) {
+// ── 상호 정규화·유사도 + BC 등록 지역 대조 (2026-09-11, mockLocation.service.js 와 같은 규칙) ──
+//   인허가 API 에는 사업자번호 항목이 없다(상호 LIKE 검색뿐). 그래서 동명 다른 가게가 섞여 오고,
+//   종전 코드는 첫 업종 API 에 결과가 하나라도 있으면 폐업이어도 거기서 반환했다(호텔스타 → 「호텔스타건대(폐업)」).
+const normalizeName = s => String(s || '').replace(/<[^>]+>/g, '').replace(/[\s\(\)（）\[\]·\-_,.&'"]/g, '').toLowerCase();
+function nameSimilar(a, b) {
+  const x = normalizeName(a), y = normalizeName(b);
+  if (!x || !y) return 0;
+  if (x === y) return 2;
+  const short = x.length <= y.length ? x : y, long = x.length <= y.length ? y : x;
+  return short.length >= 3 && long.includes(short) ? 1 : 0;
+}
+function regionMatch(address, region) {
+  if (!region || !address) return { sigungu: false, dong: false };
+  const addr = String(address);
+  const sidoShort = (region.sido || '').replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, '');
+  const sigungu = !!region.sigungu && addr.includes(region.sigungu) && (!sidoShort || addr.includes(sidoShort));
+  const dong = sigungu && !!region.dong && addr.includes(region.dong.replace(/\d+동$/, ''));
+  return { sigungu, dong };
+}
+
+/**
+ * 업종 API 6종을 **동시에** 조회해 후보를 모으고, 상호 유사도 + 영업 상태 + BC 등록 지역 + 네이버 주소로 골라낸다.
+ *  - 타임아웃 8초, 타임아웃은 재시도하지 않는다(미용업 API 가 응답 없이 20초를 끌던 것이 33초의 원인). 최대 대기 = 8초.
+ *  - BC 등록 지역(시군구)이 있으면 그 지역 밖의 후보는 버린다 — 인허가 원장에 사업자번호가 없어 지역이 유일한 식별 근거.
+ *  - 영업 중 일치가 있으면 그것, 없고 동명 폐업만 있으면 폐업으로, 아무것도 없으면 조회 결과 없음.
+ */
+async function getLicenseLive(storeName, address, businessNumber) {
   const serviceKey = process.env.LICENSE_API_KEY || process.env.NTS_API_KEY;
   if (!serviceKey) throw new Error('LICENSE_API_KEY 미설정');
 
-  // 주소가 있으면 더 많은 결과를 받아서 지점 매칭
-  const perPage = address ? 10 : 5;
+  const region = getMerchantRegion(businessNumber);
+  const LICENSE_TIMEOUT = 6000; // 건강한 업종 API 는 0.1~3초. 미용업처럼 무응답인 API 가 전체를 끌지 않게 상한
 
-  // Render 콜드스타트 + data.go.kr 지연으로 조회가 간헐적으로 실패하면
-  // 인허가 0점 → 위치 교차검증도 막혀 12점으로 떨어지므로, 타임아웃을 넉넉히
-  // 두고 일시적 실패(타임아웃/네트워크) 시 1회 재시도한다.
-  const LICENSE_TIMEOUT = 15000;
-  async function getWithRetry(url) {
+  // API 는 perPage 를 얼마로 주든 최대 10건만 준다(실측). 동명이 많은 상호(「오군」 40건)는 뒤 페이지에 진짜 매장이 있으므로
+  // totalCount 만큼(최대 MAX_PAGES 페이지) 이어 받는다. 첫 페이지 뒤의 페이지는 동시에 요청.
+  const PAGE_SIZE = 10, MAX_PAGES = 1; // 실측: page=2~4 도 1페이지와 같은 10건을 돌려준다(API 가 page 무시) → 이어받기 실효 없음, 1페이지만
+  const getPage = async (path, page) => {
+    const url = `https://apis.data.go.kr${path}`
+      + `?serviceKey=${encodeURIComponent(serviceKey)}`
+      + `&perPage=${PAGE_SIZE}&page=${page}&returnType=json`
+      + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(storeName)}`;
+    let res;
     try {
-      return await axios.get(url, { timeout: LICENSE_TIMEOUT });
+      res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
     } catch (e) {
-      // 서버 응답이 없는 일시적 오류만 재시도 (403 등 정상 응답 코드는 재시도 무의미)
-      if (e.response) throw e;
-      return await axios.get(url, { timeout: LICENSE_TIMEOUT });
+      // 정상 응답 코드(403 등)·타임아웃은 재시도 무의미. 연결 끊김 같은 일시 오류만 1회 재시도
+      if (e.response || e.code === 'ECONNABORTED') throw e;
+      res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
     }
+    const body = res.data?.response?.body || {};
+    const items = body.items?.item;
+    return { list: items ? (Array.isArray(items) ? items : [items]) : [], total: Number(body.totalCount) || 0 };
+  };
+  const fetchOne = async ({ url: path, name }) => {
+    const first = await getPage(path, 1);
+    const pages = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE));
+    const rest = pages > 1
+      ? (await Promise.allSettled(Array.from({ length: pages - 1 }, (_, i) => getPage(path, i + 2)))).flatMap(r => (r.status === 'fulfilled' ? r.value.list : []))
+      : [];
+    return [...first.list, ...rest].map(item => ({ item, type: name }));
+  };
+
+  const settled = await Promise.allSettled(DATA_GO_KR_LICENSE_APIS.map(fetchOne));
+  const candidates = [];
+  const failed = [];
+  settled.forEach((s, i) => {
+    if (s.status === 'fulfilled') candidates.push(...s.value);
+    else failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
+  });
+  if (failed.length) console.warn(`[인허가] 응답 없음·오류: ${failed.join(', ')}`);
+
+  const scored = candidates.map(c => {
+    const i = c.item;
+    const addr = `${i.ROAD_NM_ADDR || ''} ${i.LOTNO_ADDR || ''}`;
+    const sim = nameSimilar(i.BPLC_NM, storeName);
+    const rm = regionMatch(addr, region);
+    const am = matchAddress(addr, address); // 네이버 주소 키워드 겹침 비율 0~1
+    const active = i.DTL_SALS_STTS_NM === '영업';
+    return { ...c, sim, rm, am, active, score: sim * 2 + (rm.sigungu ? 3 : 0) + (rm.dong ? 1 : 0) + am * 2 + (active ? 1 : 0) };
+  })
+    .filter(c => c.sim >= 1)
+    .filter(c => !region || c.rm.sigungu) // BC 등록 지역 밖은 다른 가게
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored.find(c => c.active) || null;
+  const bcRegion = region ? { sido: region.sido, sigungu: region.sigungu, dong: region.dong, matched: !!best?.rm.sigungu, dongMatched: !!best?.rm.dong } : null;
+
+  if (best) {
+    const a = best.item;
+    if (best.am > 0) console.log(`[인허가] 주소 매칭: ${a.BPLC_NM} (score: ${best.am.toFixed(2)})`);
+    return {
+      hasLicense: true,
+      licenseType: best.type,
+      licenseStatus: a.DTL_SALS_STTS_NM || '영업',
+      licenseDate: a.LCPMT_YMD || '',
+      expiryDate: a.CLSBIZ_YMD || null,
+      address: a.ROAD_NM_ADDR || a.LOTNO_ADDR || '',
+      bcRegion,
+      detail: `${best.type} 영업허가 유효 (${a.LCPMT_YMD || '취득일 미상'}) — ${a.BPLC_NM}`,
+    };
   }
 
-  for (const { url: path, name } of DATA_GO_KR_LICENSE_APIS) {
-    try {
-      const url = `https://apis.data.go.kr${path}`
-        + `?serviceKey=${encodeURIComponent(serviceKey)}`
-        + `&perPage=${perPage}&page=1&returnType=json`
-        + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(storeName)}`;
-
-      const res = await getWithRetry(url);
-
-      const items = res.data?.response?.body?.items?.item;
-      if (!items) continue;
-      const list = Array.isArray(items) ? items : [items];
-      if (list.length === 0) continue;
-
-      // 영업 중인 건만 필터
-      const activeList = list.filter(i => i.DTL_SALS_STTS_NM === '영업');
-
-      let active;
-      if (address && activeList.length > 1) {
-        // 주소 매칭으로 정확한 지점 선택
-        const scored = activeList.map(i => ({
-          item: i,
-          score: matchAddress(i.ROAD_NM_ADDR || i.LOTNO_ADDR || '', address),
-        }));
-        scored.sort((a, b) => b.score - a.score);
-        active = scored[0].score > 0 ? scored[0].item : activeList[0];
-        if (scored[0].score > 0) {
-          console.log(`[인허가] 주소 매칭: ${scored[0].item.BPLC_NM} (score: ${scored[0].score.toFixed(2)})`);
-        }
-      } else {
-        active = activeList[0] || list[0];
-      }
-
-      const isActive = active.DTL_SALS_STTS_NM === '영업';
-
-      return {
-        hasLicense: isActive,
-        licenseType: name,
-        licenseStatus: active.DTL_SALS_STTS_NM || '미확인',
-        licenseDate: active.LCPMT_YMD || '',
-        expiryDate: active.CLSBIZ_YMD || null,
-        address: active.ROAD_NM_ADDR || active.LOTNO_ADDR || '',
-        detail: isActive
-          ? `${name} 영업허가 유효 (${active.LCPMT_YMD || '취득일 미상'}) — ${active.BPLC_NM}`
-          : `${name} ${active.DTL_SALS_STTS_NM || '미확인'} — ${active.BPLC_NM}`,
-      };
-    } catch {
-      continue;
-    }
+  // 영업 중 일치는 없고 동명(같은 지역) 폐업·휴업만 있는 경우
+  const closed = scored[0] || null;
+  if (closed) {
+    const a = closed.item;
+    return {
+      hasLicense: false,
+      licenseType: closed.type,
+      licenseStatus: a.DTL_SALS_STTS_NM || '미확인',
+      licenseDate: a.LCPMT_YMD || '',
+      expiryDate: a.CLSBIZ_YMD || null,
+      address: a.ROAD_NM_ADDR || a.LOTNO_ADDR || '',
+      bcRegion: bcRegion ? { ...bcRegion, matched: !!closed.rm.sigungu, dongMatched: !!closed.rm.dong } : null,
+      detail: `${closed.type} ${a.DTL_SALS_STTS_NM || '미확인'} — ${a.BPLC_NM} (영업 중인 동일 상호 없음)`,
+    };
   }
 
   return {
@@ -218,7 +265,8 @@ async function getLicenseLive(storeName, address) {
     licenseDate: null,
     expiryDate: null,
     address: null,
-    detail: '행정인허가 조회 결과 없음 (인허가 불필요 업종이거나 미취득)',
+    bcRegion: bcRegion ? { ...bcRegion, matched: false, dongMatched: false } : null,
+    detail: `행정인허가 조회 결과 없음 (인허가 불필요 업종이거나 미취득${failed.length ? ` · ${failed.join('·')} API 응답 없음` : ''})`,
   };
 }
 
@@ -233,7 +281,7 @@ async function getLicenseInfo(businessNumber, storeName, address) {
   }
 
   try {
-    const result = await getLicenseLive(storeName, address);
+    const result = await getLicenseLive(storeName, address, businessNumber);
     return { ...result, dataSource: 'LIVE' };
   } catch (e) {
     console.warn('[행정인허가 Live 실패 → Mock 전환]', e.message);

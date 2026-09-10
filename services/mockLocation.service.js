@@ -33,8 +33,9 @@ function nameSimilar(a, b) {
 function regionMatch(address, region) {
   if (!region || !address) return { sigungu: false, dong: false };
   const addr = String(address);
-  const sigungu = !!region.sigungu && addr.includes(region.sigungu);
-  const dong = !!region.dong && addr.includes(region.dong.replace(/\d+동$/, '')); // '서초2동' 은 도로명 주소에 '서초' 로만 나올 수 있다
+  const sidoShort = (region.sido || '').replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, ''); // '중구' 는 서울·대구·부산에 다 있어 시도까지 본다
+  const sigungu = !!region.sigungu && addr.includes(region.sigungu) && (!sidoShort || addr.includes(sidoShort));
+  const dong = sigungu && !!region.dong && addr.includes(region.dong.replace(/\d+동$/, '')); // '서초2동' 은 도로명 주소에 '서초' 로만 나올 수 있다
   return { sigungu, dong };
 }
 
