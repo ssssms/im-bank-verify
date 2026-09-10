@@ -153,13 +153,19 @@ function matchAddress(candidateAddr, referenceAddr) {
 //   인허가 API 에는 사업자번호 항목이 없다(상호 LIKE 검색뿐). 그래서 동명 다른 가게가 섞여 오고,
 //   종전 코드는 첫 업종 API 에 결과가 하나라도 있으면 폐업이어도 거기서 반환했다(호텔스타 → 「호텔스타건대(폐업)」).
 const normalizeName = s => String(s || '').replace(/<[^>]+>/g, '').replace(/[\s\(\)（）\[\]·\-_,.&'"]/g, '').toLowerCase();
+// 괄호 속 내용(영문 병기 등)을 뗀 변형도 함께 비교 — 「알에스 (RS)다나재활의학과의원」 ↔ 「알에스다나재활의학과의원」
+const nameVariants = s => { const raw = String(s || ''); const stripped = raw.replace(/[\(（][^\)）]*[\)）]/g, ''); return [...new Set([normalizeName(raw), normalizeName(stripped)].filter(Boolean))]; };
 function nameSimilar(a, b) {
-  const x = normalizeName(a), y = normalizeName(b);
-  if (!x || !y) return 0;
-  if (x === y) return 2;
-  const short = x.length <= y.length ? x : y, long = x.length <= y.length ? y : x;
-  return short.length >= 3 && long.includes(short) ? 1 : 0;
+  let best = 0;
+  for (const x of nameVariants(a)) for (const y of nameVariants(b)) {
+    if (x === y) return 2;
+    const short = x.length <= y.length ? x : y, long = x.length <= y.length ? y : x;
+    if (short.length >= 3 && long.includes(short)) best = Math.max(best, 1);
+  }
+  return best;
 }
+// 영업 상태 판정 — 업종마다 표기가 다르다: 일반음식점 「영업」, 의원·병원 「영업중」, 「정상」 등. 「영업」으로 시작하거나 「정상」이면 영업 중
+const isActiveStatus = s => /^(영업|정상)/.test(String(s || '').trim());
 function regionMatch(address, region) {
   if (!region || !address) return { sigungu: false, dong: false };
   const addr = String(address);
@@ -185,11 +191,17 @@ async function getLicenseLive(storeName, address, businessNumber) {
   // API 는 perPage 를 얼마로 주든 최대 10건만 준다(실측). 동명이 많은 상호(「오군」 40건)는 뒤 페이지에 진짜 매장이 있으므로
   // totalCount 만큼(최대 MAX_PAGES 페이지) 이어 받는다. 첫 페이지 뒤의 페이지는 동시에 요청.
   const PAGE_SIZE = 10, MAX_PAGES = 1; // 실측: page=2~4 도 1페이지와 같은 10건을 돌려준다(API 가 page 무시) → 이어받기 실효 없음, 1페이지만
+  // ★ 10건 제한 우회(2026-09-11 실측): BC 등록 지역이 있으면 도로명주소 LIKE 「시도 시군구」 조건을 상호 조건과 함께 보낸다.
+  //   「오군」은 동명 40건 중 10건만 오던 것이 「서울특별시 중구」 조건으로 2건(중구 다동길 20 영업)으로 좁혀진다.
+  const regionCond = region?.sido && region?.sigungu
+    ? `&cond%5BROAD_NM_ADDR%3A%3ALIKE%5D=${encodeURIComponent(`${region.sido} ${region.sigungu}`)}`
+    : '';
   const getPage = async (path, page) => {
     const url = `https://apis.data.go.kr${path}`
       + `?serviceKey=${encodeURIComponent(serviceKey)}`
       + `&perPage=${PAGE_SIZE}&page=${page}&returnType=json`
-      + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(storeName)}`;
+      + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(storeName)}`
+      + regionCond;
     let res;
     try {
       res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
@@ -229,7 +241,7 @@ async function getLicenseLive(storeName, address, businessNumber) {
     const sim = nameSimilar(i.BPLC_NM, storeName);
     const rm = regionMatch(addr, region);
     const am = matchAddress(addr, address); // 네이버 주소 키워드 겹침 비율 0~1
-    const active = i.DTL_SALS_STTS_NM === '영업';
+    const active = isActiveStatus(i.DTL_SALS_STTS_NM);
     return { ...c, sim, rm, am, active, score: sim * 2 + (rm.sigungu ? 3 : 0) + (rm.dong ? 1 : 0) + am * 2 + (active ? 1 : 0) };
   })
     .filter(c => c.sim >= 1)
@@ -254,8 +266,9 @@ async function getLicenseLive(storeName, address, businessNumber) {
     };
   }
 
-  // 영업 중 일치는 없고 동명(같은 지역) 폐업·휴업만 있는 경우
-  const closed = scored[0] || null;
+  // 영업 중 일치는 없고 동명(같은 지역) 폐업·휴업만 있는 경우 — 상호 완전 일치이거나 행정동까지 맞을 때만 「폐업」으로 본다.
+  // (같은 구의 「그린헬스클럽(방촌동) 폐업」을 신천3동 「그린헬스」의 폐업으로 보이면 안 된다 → 그 경우는 조회 결과 없음)
+  const closed = scored.find(c => c.sim === 2 || c.rm.dong) || null;
   if (closed) {
     const a = closed.item;
     return {

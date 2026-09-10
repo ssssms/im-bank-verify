@@ -22,12 +22,16 @@ const { getMerchantRegion } = require('./bcData.service'); // BC 가맹점 등�
 //   nameSimilar   : 완전 일치 → 2점, 한쪽이 다른 쪽을 포함(짧은 쪽 3글자 이상) → 1점, 그 외 0
 //   ※ 종전 「양방향 includes」는 상호가 한 글자인 가게(「나」)가 「나살던고향」과 일치로 잡혔다.
 const normalizeName = s => String(s || '').replace(/<[^>]+>/g, '').replace(/[\s\(\)（）\[\]·\-_,.&'"]/g, '').toLowerCase();
+// 괄호 속 내용(영문 병기 등)을 뗀 변형도 함께 비교 — 「알에스 (RS)다나재활의학과의원」 ↔ 「RS다나재활의학과의원」 (2026-09-11)
+const nameVariants = s => { const raw = String(s || ''); const stripped = raw.replace(/[\(（][^\)）]*[\)）]/g, ''); return [...new Set([normalizeName(raw), normalizeName(stripped)].filter(Boolean))]; };
 function nameSimilar(a, b) {
-  const x = normalizeName(a), y = normalizeName(b);
-  if (!x || !y) return 0;
-  if (x === y) return 2;
-  const short = x.length <= y.length ? x : y, long = x.length <= y.length ? y : x;
-  return short.length >= 3 && long.includes(short) ? 1 : 0;
+  let best = 0;
+  for (const x of nameVariants(a)) for (const y of nameVariants(b)) {
+    if (x === y) return 2;
+    const short = x.length <= y.length ? x : y, long = x.length <= y.length ? y : x;
+    if (short.length >= 3 && long.includes(short)) best = Math.max(best, 1);
+  }
+  return best;
 }
 // 주소가 BC 가맹점 등록 지역(시군구·행정동)과 맞는가 → { sigungu, dong }
 function regionMatch(address, region) {
