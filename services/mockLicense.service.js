@@ -17,7 +17,7 @@
 
 const axios = require('axios');
 const { getMerchantRegion } = require('./bcData.service');
-const { rankCandidates } = require('../utils/licenseMatch'); // 사업체 특정(상호·주소·상태 채점, 2026-09-11) // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
+const { rankCandidates, parseAddress } = require('../utils/licenseMatch'); // 사업체 특정(상호·주소·상태 채점, 2026-09-11) // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
 const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
@@ -197,12 +197,15 @@ async function getLicenseLive(storeName, address, businessNumber) {
   const regionCond = region?.sido && region?.sigungu
     ? `&cond%5BROAD_NM_ADDR%3A%3ALIKE%5D=${encodeURIComponent(`${region.sido} ${region.sigungu}`)}`
     : '';
-  const getPage = async (path, page, query = storeName) => {
+  // query = { name } 상호 LIKE (+ BC 시군구 조건) / { road } 도로명주소 LIKE 만 (상호 조건 없음 — 주소 검색 폴백)
+  const getPage = async (path, page, query = { name: storeName }) => {
+    const cond = query.road
+      ? `&cond%5BROAD_NM_ADDR%3A%3ALIKE%5D=${encodeURIComponent(query.road)}`
+      : `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(query.name)}` + regionCond;
     const url = `https://apis.data.go.kr${path}`
       + `?serviceKey=${encodeURIComponent(serviceKey)}`
       + `&perPage=${PAGE_SIZE}&page=${page}&returnType=json`
-      + `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(query)}`
-      + regionCond;
+      + cond;
     let res;
     try {
       res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
@@ -227,7 +230,11 @@ async function getLicenseLive(storeName, address, businessNumber) {
   // 검색어 변형 라운드(2026-09-11): 원장 상호는 「알에스다나재활의학과의원」인데 입력이 「알에스 (RS)다나재활의학과의원」이면 LIKE 가 0건.
   //   원문 → 괄호 병기 제거 → 공백까지 제거 순으로, 후보가 하나라도 나오면 멈춘다(보통 1라운드).
   const noParen = storeName.replace(/[\(（][^\)）]*[\)）]/g, '').replace(/\s+/g, ' ').trim();
-  const queryVariants = [...new Set([storeName, noParen, noParen.replace(/\s+/g, '')].filter(q => q.length >= 2))];
+  const queryVariants = [...new Set([storeName, noParen, noParen.replace(/\s+/g, '')].filter(q => q.length >= 2))].map(name => ({ name }));
+  // ★ 주소 검색 폴백(2026-09-11): 원장 상호가 「나 살던 고향」처럼 띄어쓰기·표기가 달라 상호 LIKE 로는 못 찾는 경우,
+  //   네이버 도로명주소의 「도로명 건물번호」(예: 강남대로37길 28)로 그 주소에 등록된 업체를 받아 정규화 상호로 대조한다.
+  const parsedRef = parseAddress(address);
+  if (parsedRef?.road && parsedRef?.building) queryVariants.push({ road: `${parsedRef.road} ${parsedRef.building}` });
 
   const candidates = [];
   const failed = [];      // 응답 없음(타임아웃·네트워크) — 조회 결과 없음 detail 에 표기
