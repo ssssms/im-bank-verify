@@ -24,13 +24,37 @@
 //   원본은 절대 바꾸지 않는다 — 비교용 문자열만 만든다.
 const CORP_WORDS = /(주식회사|유한회사|유한책임회사|합자회사|합명회사|재단법인|사단법인|농업회사법인|영농조합법인|\(주\)|（주）|㈜|\(유\)|（유）|\(재\)|\(사\))/g;
 const BRANCH_WORDS = /(본점|본사|직영점|점)$/;
+// 업종 표현 동의어(2026-09-11): BC 가맹점명이 간판·원장과 다른 표현을 쓰는 경우 — 「삼덕동빵집」= 네이버·원장 「삼덕동베이커리(까페)」.
+//   비교 시 각 묶음을 첫 단어로 통일하고, 네이버·인허가 검색어 변형에도 쓴다. 긴 표현을 먼저 두어 부분 치환을 막는다.
+const SYNONYM_GROUPS = [
+  ['빵집', '베이커리', '제과점', '제과'],
+  ['카페', '까페', '커피숍', '커피샵', '커피전문점', '커피'],
+  ['미용실', '헤어샵', '헤어숍', '헤어살롱', '헤어'],
+  ['뷰티샵', '뷰티숍', '뷰티살롱'],
+  ['치킨', '치킨집', '통닭'],
+  ['호프', '맥주집', '비어'],
+];
+const canonicalizeTerms = s => SYNONYM_GROUPS.reduce((acc, [head, ...alts]) => alts.sort((a, b) => b.length - a.length).reduce((x, alt) => x.split(alt).join(head), acc), s);
+/** 검색어 변형: 상호에 동의어가 들어 있으면 같은 묶음의 다른 표현으로 바꾼 이름들 (원문 제외, 중복 제거) */
+function synonymVariants(name) {
+  const out = new Set();
+  for (const group of SYNONYM_GROUPS) {
+    for (const term of group) {
+      if (!name.includes(term)) continue;
+      for (const alt of group) if (alt !== term) out.add(name.split(term).join(alt));
+    }
+  }
+  out.delete(name);
+  return [...out];
+}
 function normalizeBusinessName(raw) {
-  return String(raw || '')
+  const base = String(raw || '')
     .replace(/<[^>]+>/g, '')
     .replace(/[\(（][^\)）]*[\)）]/g, ' ')   // 괄호와 그 안의 병기(영문 등)
     .replace(CORP_WORDS, ' ')
     .replace(/[\s·\-_,.&'"~!@#$%^*+=\[\]{}|\\/:;<>?`]/g, '')
     .toLowerCase();
+  return canonicalizeTerms(base);
 }
 const nameVariants = raw => {
   const n = normalizeBusinessName(raw);
@@ -76,8 +100,12 @@ function parseAddress(addr) {
   const road = roadMatch ? roadMatch[1] : null;
   const building = roadMatch ? roadMatch[2] : null;
   const dongMatch = s.match(/\(([가-힣0-9]+(?:동|가|읍|면|리))[^)]*\)/) || s.match(/\s([가-힣]+\d*(?:동|읍|면|리))(?:\s|$)/);
-  const dong = dongMatch ? dongMatch[1].replace(/\d+(동|가)$/, '$1') : null;
+  const dong = dongMatch ? dongBase(dongMatch[1]) : null;
   return { raw, sido, sidoShort, sigungu, road, building, dong };
+}
+// 동 이름의 기준형: 「삼덕동3가」「남대문로5가」→ 「삼덕동」「남대문로」, 「서초2동」→「서초동」 (법정동 「N가」·행정동 「N동」 번호 제거)
+function dongBase(d) {
+  return String(d || '').replace(/\d+가$/, '').replace(/\d+동$/, '동');
 }
 
 /** 주소 점수 0~50 + 사유. ref.address(네이버)·ref.region(BC) 중 있는 것으로 비교 */
@@ -108,8 +136,8 @@ function scoreAddress(candidateAddr, ref) {
     } else if (sigunguOk) misses.push('도로명 불일치');
   }
   // 행정동 (BC 등록 행정동 또는 네이버 지번 동)
-  const refDong = (region?.dong || '').replace(/\d+동$/, '동') || j?.dong || n?.dong || null;
-  if (refDong && c.dong && c.dong.replace(/\d+동$/, '동') === refDong.replace(/\d+동$/, '동')) { score += 5; reasons.push('행정동 일치'); }
+  const refDong = dongBase(region?.dong) || j?.dong || n?.dong || null;
+  if (refDong && c.dong && dongBase(c.dong) === dongBase(refDong)) { score += 5; reasons.push('행정동 일치'); }
 
   return { score: Math.min(50, score), reasons, misses, parts: c };
 }
@@ -154,4 +182,4 @@ function rankCandidates(candidates, ref) {
   return rows.sort((a, b) => rank[b.confidence] - rank[a.confidence] || b.matchScore - a.matchScore || (b.active - a.active));
 }
 
-module.exports = { normalizeBusinessName, parseAddress, scoreName, scoreAddress, rankCandidates, isActiveStatus, confidenceOf };
+module.exports = { normalizeBusinessName, synonymVariants, SYNONYM_GROUPS, parseAddress, scoreName, scoreAddress, rankCandidates, isActiveStatus, confidenceOf };

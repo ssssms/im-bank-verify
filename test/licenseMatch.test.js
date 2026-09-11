@@ -21,7 +21,8 @@ ok('법인 표기·공백·괄호 정규화: (주) ABC 푸드 = 주식회사 ABC
 
 ok('주소 파싱: 시도·시군구·도로명·건물번호·법정동', () => {
   const p = parseAddress('서울특별시 중구 통일로 10 (남대문로5가)');
-  assert.deepStrictEqual([p.sidoShort, p.sigungu, p.road, p.building, p.dong], ['서울', '중구', '통일로', '10', '남대문로가']);
+  assert.deepStrictEqual([p.sidoShort, p.sigungu, p.road, p.building, p.dong], ['서울', '중구', '통일로', '10', '남대문로']);
+  assert.strictEqual(parseAddress('대구광역시 중구 달구벌대로447길 58 (삼덕동3가, 지상1층)').dong, '삼덕동');
   const q = parseAddress('경기도 수원시 장안구 서부로 2136, 2층 (율전동)');
   assert.deepStrictEqual([q.sigungu, q.road, q.building, q.dong], ['수원시 장안구', '서부로', '2136', '율전동']);
 });
@@ -92,6 +93,21 @@ ok('BC 지역만 있고 네이버 주소가 없어도 시군구+행정동 일치
 
 ok('인허가 데이터 없음 → 후보 0건', () => {
   assert.deepStrictEqual(rankCandidates([], ref), []);
+});
+
+ok('업종 동의어: 삼덕동빵집 = 삼덕동베이커리 = 삼덕동제과점, 검색어 변형 생성', () => {
+  const { synonymVariants } = require('../utils/licenseMatch');
+  assert.strictEqual(normalizeBusinessName('삼덕동베이커리'), normalizeBusinessName('삼덕동빵집'));
+  assert.strictEqual(normalizeBusinessName('삼덕동제과점'), normalizeBusinessName('삼덕동빵집'));
+  assert.strictEqual(normalizeBusinessName('초이 커피숍'), normalizeBusinessName('초이카페'));
+  const v = synonymVariants('삼덕동빵집');
+  assert.ok(v.includes('삼덕동베이커리') && v.includes('삼덕동제과점'), v.join(','));
+  assert.deepStrictEqual(synonymVariants('호텔스타'), []);
+});
+
+ok('동의어 + 같은 주소 → 「삼덕동베이커리까페」는 「삼덕동빵집」의 HIGH 이상', () => {
+  const r = top([row('삼덕동베이커리까페', '대구광역시 중구 달구벌대로447길 58 (삼덕동3가, 지상1층)')], { storeName: '삼덕동빵집', region: { sido: '대구광역시', sigungu: '중구', dong: '삼덕동' }, address: '대구광역시 중구 달구벌대로447길 58 1층' });
+  assert.ok(r.confidence === 'EXACT' || r.confidence === 'HIGH', `${r.confidence} ${r.matchScore}`);
 });
 
 console.log(`✅ ${n}건 통과`);

@@ -16,13 +16,14 @@
 
 const axios = require('axios');
 const { getMerchantRegion } = require('./bcData.service'); // BC 가맹점 등록 주소(시도·시군구·행정동) — 샘플에 없으면 null (2026-09-10)
+const { synonymVariants, normalizeBusinessName } = require('../utils/licenseMatch'); // 업종 표현 동의어·상호 정규화 (2026-09-11)
 
 // ── 상호 정규화·유사도 (2026-09-10) ───────────────────────────
 //   normalizeName : 공백·괄호·특수문자 제거, 소문자
 //   nameSimilar   : 완전 일치 → 2점, 한쪽이 다른 쪽을 포함(짧은 쪽 3글자 이상) → 1점, 그 외 0
 //   ※ 종전 「양방향 includes」는 상호가 한 글자인 가게(「나」)가 「나살던고향」과 일치로 잡혔다.
-const normalizeName = s => String(s || '').replace(/<[^>]+>/g, '').replace(/[\s\(\)（）\[\]·\-_,.&'"]/g, '').toLowerCase();
-// 괄호 속 내용(영문 병기 등)을 뗀 변형도 함께 비교 — 「알에스 (RS)다나재활의학과의원」 ↔ 「RS다나재활의학과의원」 (2026-09-11)
+// 상호 정규화는 licenseMatch.normalizeBusinessName(법인 표기·괄호·특수문자 제거 + 업종 동의어 통일)으로 통일 (2026-09-11)
+const normalizeName = s => normalizeBusinessName(s);
 const nameVariants = s => { const raw = String(s || ''); const stripped = raw.replace(/[\(（][^\)）]*[\)）]/g, ''); return [...new Set([normalizeName(raw), normalizeName(stripped)].filter(Boolean))]; };
 function nameSimilar(a, b) {
   let best = 0;
@@ -79,23 +80,28 @@ async function searchByKeyword(storeName, region = null) {
   if (region?.sigungu) {
     push(`${region.sigungu} ${storeName}`);
     push(`${sidoShort} ${region.sigungu} ${storeName}`.trim());
+    // 업종 표현 동의어(「삼덕동빵집」→「삼덕동베이커리」) — BC 가맹점명이 간판과 다른 표현일 때 (2026-09-11)
+    for (const alt of synonymVariants(storeName)) push(`${sidoShort} ${region.sigungu} ${alt}`.trim());
     if (bare && bare !== storeName && bare.length >= 2) push(`${sidoShort} ${region.sigungu} ${bare}`.trim());
   }
   push(storeName);
+  for (const alt of synonymVariants(storeName)) push(alt);
 
   const scoreItems = items => items.map((it, i) => {
     const rm = regionMatch(`${it.roadAddress || ''} ${it.address || ''}`, region);
     return { it, i, score: nameSimilar(it.title, storeName) + (rm.sigungu ? 2 : 0) + (rm.dong ? 1 : 0), rm };
   }).sort((a, b) => b.score - a.score || a.i - b.i);
 
-  let scored = null; // 지역 일치 후보가 나오면 그 즉시 채택, 아니면 처음 나온 결과를 유지
+  // 검색어를 차례로 시도하며 최고 점수 후보를 유지. 지역 일치 + 상호 유사(≥1) 후보가 나오면 그 즉시 채택.
+  //   (종전엔 지역만 맞으면 채택해 「중구 삼덕동빵집」→「인더매스 삼덕」(다른 가게)이 잡혔다 — 2026-09-11)
+  let scored = null;
   for (const q of queries) {
     const items = await call(q);
     if (!items.length) continue;
     const s = scoreItems(items);
-    if (!scored) scored = s;
-    if (s[0].rm.sigungu) { scored = s; break; }
-    if (!region) break; // 지역 정보가 없으면 첫 결과로 끝
+    if (!scored || s[0].score > scored[0].score) scored = s;
+    if (s[0].rm.sigungu && nameSimilar(s[0].it.title, storeName) >= 1) { scored = s; break; }
+    if (!region && nameSimilar(s[0].it.title, storeName) >= 1) break; // 지역 정보가 없으면 상호가 맞는 첫 결과로 끝
   }
   if (!scored) return null;
   const best = scored[0].it;
