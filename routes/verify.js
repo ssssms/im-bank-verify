@@ -144,7 +144,8 @@ router.post('/business', async (req, res) => {
     return res.status(400).json({ success: false, error: validation.error });
   }
   const cleanBizNum = validation.cleaned;
-  const name = storeName || '';
+  // 상호가 비면 BC 가맹점명으로 채운다(2026-09-11) — 위치·인허가는 상호로 검색하므로, 화면에서 국세청 조회가 끝나기 전에 시작을 누르면 가상 데이터로 빠지던 것
+  const name = storeName || getMerchantName(cleanBizNum) || '';
 
   console.log(`[검증 시작] 사업자번호: ${cleanBizNum.substring(0, 3)}*******`);
 
@@ -217,7 +218,8 @@ router.get('/stream', async (req, res) => {
     return res.status(400).json({ success: false, error: validation.error });
   }
   const cleanBizNum = validation.cleaned;
-  const name = storeName || '';
+  // 상호가 비면 BC 가맹점명으로 채운다(2026-09-11) — 위치·인허가는 상호로 검색하므로, 화면에서 국세청 조회가 끝나기 전에 시작을 누르면 가상 데이터로 빠지던 것
+  const name = storeName || getMerchantName(cleanBizNum) || '';
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
