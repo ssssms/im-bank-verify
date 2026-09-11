@@ -9,11 +9,12 @@
     "demo:test": "node test/demo.test.js",
     "test:eligibility": "node test/eligibility.test.js",
     "admin:test": "node test/admin.test.js",
-    "test": "node test/eligibility.test.js && node test/licenseMatch.test.js && node test/demo.test.js && node test/admin.test.js",
+    "test": "node test/eligibility.test.js && node test/licenseMatch.test.js && node test/fdsSpike.test.js && node test/demo.test.js && node test/admin.test.js",
     "demo:sse": "node test/sse.log.js",
     "bc:import": "node scripts/bc_import.js",
     "bc:report": "node test/bc.report.js",
-    "test:match": "node test/licenseMatch.test.js"
+    "test:match": "node test/licenseMatch.test.js",
+    "test:spike": "node test/fdsSpike.test.js"
   },
   "dependencies": {
     "axios": "^1.6.7",

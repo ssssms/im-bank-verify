@@ -25,7 +25,7 @@ const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222
 const SOURCE_LABEL = {
   LIVE:      '실제 연동',
   MOCK:      '가상 데이터',
-  BC_SAMPLE: 'BC 실데이터(샘플)',
+  BC_SAMPLE: '실제 연동(BC실데이터)',
 };
 function sourceLabel(dataSource) {
   return SOURCE_LABEL[dataSource] || SOURCE_LABEL.MOCK;

@@ -61,10 +61,15 @@ function deriveMetrics(sales) {
   const customerTrend = olderCust > 0 ? recentCust / olderCust : (recentCust > 0 ? 1 : 0);
 
   // 직전 1개월 매출 급증 배수 (가장매출 급조 의심)
+  // [2026-09-11] 비교 기준은 「영업을 시작한 뒤」의 직전 달들만. 첫 매출이 발생한 달(개업) 이전의 0원 달을
+  //   평균에 넣으면 개업 2개월째 매장(송담추어탕 5→6월 1.4배)이 「직전 3개월 평균의 4.3배」로 잡혔다.
+  //   영업 시작 후 비교할 달이 1~2개뿐이면 그 달들만으로, 하나도 없으면(첫 달) 비교하지 않는다.
   const last = monthly[monthly.length - 1];
-  const prev3 = monthly.slice(Math.max(0, monthly.length - 4), monthly.length - 1);
-  const prev3Avg = avg(prev3, 'sales');
-  const spikeRatio = prev3Avg > 0 ? (last?.sales || 0) / prev3Avg : 0;
+  const firstActiveIdx = monthly.findIndex(m => (m.sales || 0) > 0 || (m.txCount || 0) > 0);
+  const baseStart = Math.max(firstActiveIdx < 0 ? 0 : firstActiveIdx, monthly.length - 4);
+  const spikeBase = monthly.slice(baseStart, monthly.length - 1);
+  const spikeBaseAvg = avg(spikeBase, 'sales');
+  const spikeRatio = spikeBaseAvg > 0 ? (last?.sales || 0) / spikeBaseAvg : 0;
 
   const avgMonthlySales = avg(active, 'sales');
   const industryAvgSales = sales.industryAvgSales || 0;
@@ -81,6 +86,7 @@ function deriveMetrics(sales) {
     customerRatio: totalTx > 0 ? totalCustomers / totalTx : 0,
     customerTrend,
     spikeRatio,
+    spikeBaseMonths: spikeBase.length,
     minActiveDays: active.length ? Math.min(...active.map(m => m.activeDays || 0)) : 0,
     repeatedAmountRatio: sales.repeatedAmountRatio || 0,
   };
@@ -167,7 +173,7 @@ function scoreAnomaly(m, R) {
 
   if (m.spikeRatio >= A.SPIKE_RATIO) {
     penalty += A.PENALTY_PER_FLAG;
-    flags.push(`직전 1개월 매출 급증(직전 3개월 평균의 ${m.spikeRatio.toFixed(1)}배)`);
+    flags.push(`직전 1개월 매출 급증(직전 ${m.spikeBaseMonths || 3}개월 평균의 ${m.spikeRatio.toFixed(1)}배)`);
   }
   if (m.activeMonths > 0 && m.minActiveDays > 0 && m.minActiveDays <= A.MIN_ACTIVE_DAYS) {
     penalty += A.PENALTY_PER_FLAG;
