@@ -55,7 +55,7 @@ const MOCK_LICENSE_DATA = {
     licenseDate: null,
     expiryDate: null,
     address: null,
-    detail: '행정인허가 조회 결과 없음 (신규사업자 또는 인허가 불필요 업종)',
+    detail: '인허가 조회 결과 없음 (신규 또는 인허가 불필요 업종)',
   },
   // 시나리오 C: 신설 사업자 — 인허가 신규 취득
   '5142691320': {

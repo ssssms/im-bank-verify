@@ -47,7 +47,7 @@ function calcNtsScore(ntsResult) {
   }
   return {
     score: 20,
-    detail: `계속사업자 확인 완료 (${ntsResult.businessStatusText || '계속사업자'}${ntsResult.companyName ? ' · ' + ntsResult.companyName : ''})`,
+    detail: `${ntsResult.businessStatusText || '계속사업자'} 확인 완료${ntsResult.companyName ? ' · ' + ntsResult.companyName : ''}`,
     passed: true,
   };
 }
@@ -172,7 +172,7 @@ function calcSalesScore(salesResult, ntsResult) {
 
   return {
     score: fds.score,
-    detail: `${etaxNote} 분석 (${fds.summary}${patternNote})`,
+    detail: `${etaxNote} 분석${patternNote}`,
     passed: fds.score >= RULES.FDS.PASS_SCORE,
     riskAlert: fds.riskAlert,
     subScores: fds.subScores,
@@ -347,8 +347,8 @@ function nextStepApproved() {
     type: 'AUTO_RELEASE',
     title: '자동해제 · 서류·영업점 방문 없음',
     lines: [
-      '4단계 검증을 통과해 한도제한계좌가 즉시 해제됩니다. 서류 제출도 영업점 방문도 없습니다.',
-      '앱 비대면 계좌 개설 시에는 이 검증이 개설 직후 자동으로 실행되어 이 결과가 바로 적용되고, 고객 연락처로 SMS 알림이 발송됩니다.',
+      '4단계를 통과해 한도제한계좌가 즉시 해제됩니다. 서류도 영업점 방문도 없습니다.',
+      '앱에서는 계좌 개설 직후 자동으로 적용되고, 고객 연락처로 SMS 알림이 발송됩니다.',
     ],
     remedies: [], docs: [], reverifyAvailable: false,
   };
@@ -358,14 +358,14 @@ function nextStepPending(ctx) {
   const RULES = getRules();
   const gate = ctx?.gate;
   const first = gate?.level === 'HOLD'
-    ? `위험 신호(${gate.summary})가 확인되어 자동해제되지 않습니다. 서류로 대체되지 않는 항목입니다.`
-    : `자동해제 기준(${RULES.APPROVED_CUT}점) 미달 항목이 있어 자동해제되지 않습니다. 아래 미달 항목의 서류를 지참해 영업점을 방문하면 직원이 이 결과와 서류를 보고 판단합니다.`;
+    ? `위험 신호(${gate.summary})가 확인되어 자동해제되지 않습니다. 서류로 대체되지 않습니다.`
+    : `아래 미달 항목의 서류를 지참해 영업점을 방문하면 직원이 이 결과와 함께 보고 판단합니다.`;
   return {
     type: 'REAPPLY_AFTER_REMEDY',
     title: '서류 지참 영업점 방문 · 미달 항목만 확인',
     lines: [
       first,
-      '이미 통과한 항목은 다시 확인하지 않습니다. 등록 서류(사업자등록증·부가가치세 증명)는 요구하지 않습니다.',
+      '이미 통과한 항목은 다시 보지 않습니다. 사업자등록증·부가가치세 증명은 요구하지 않습니다.',
     ],
     remedies: buildRemedies(ctx), docs: [],
   };
@@ -378,7 +378,7 @@ function nextStepRejected(kind, gate) {
       title: '자동해제 불가 · 해제 대상 아님',
       lines: [
         '국세청 사업자등록 상태가 휴업 또는 폐업으로 확인되어 한도 해제 대상이 아닙니다.',
-        '영업점을 방문해도 서류로 바뀌지 않는 판정입니다. 실제와 다르면 홈택스에서 사업자등록 상태를 정정한 뒤 다시 조회합니다.',
+        '서류로 바뀌지 않습니다. 실제와 다르면 홈택스에서 상태를 정정한 뒤 다시 조회해 주세요.',
       ],
       remedies: [], docs: [],
     };
@@ -389,7 +389,7 @@ function nextStepRejected(kind, gate) {
       title: '자동해제 불가 · 서류로 바뀌지 않음',
       lines: [
         `부정 신호가 확인되어 자동해제되지 않습니다. (${gate?.summary || '위험 신호'})`,
-        '영업점을 방문해도 서류로 바뀌지 않는 판정입니다. 직원은 이 사유를 고객에게 설명하고, 해당 신호가 해소된 뒤 다시 조회하면 최신 데이터로 다시 판정됩니다.',
+        '서류로 바뀌지 않습니다. 직원은 이 사유를 설명하고, 신호가 해소된 뒤 다시 조회하면 최신 데이터로 판정됩니다.',
       ],
       remedies: [], docs: [],
     };
@@ -399,7 +399,7 @@ function nextStepRejected(kind, gate) {
     title: '자동해제 불가 · 서류로 바뀌지 않음',
     lines: [
       '자동 검증 기준에 크게 미달해 자동해제되지 않습니다.',
-      '영업점을 방문해도 서류로 바뀌지 않는 판정입니다. 매장 실재와 카드매출이 데이터로 확인된 뒤 다시 조회합니다.',
+      '서류로 바뀌지 않습니다. 매장 실재와 카드매출이 데이터로 확인된 뒤 다시 조회해 주세요.',
     ],
     remedies: [], docs: [],
   };
@@ -410,14 +410,14 @@ function nextStepIneligible(eligibility, ntsResult) {
   const reasonText = (eligibility?.reasons || []).map(r => r.label).join(' · ') || '카드매출 이력 없음';
   const from = reapplyFrom(eligibility, ntsResult);
   const when = from
-    ? `빠르면 ${from.label}부터 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓여 다시 조회하면 자동해제 대상이 될 수 있습니다.`
-    : `카드 가맹 후 카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓인 뒤 다시 조회하면 자동해제 대상이 될 수 있습니다.`;
+    ? `고객 안내: 빠르면 ${from.label}부터 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 채워져 자동해제 대상이 됩니다.`
+    : `고객 안내: 카드 가맹 후 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓이면 자동해제 대상이 됩니다.`;
   return {
     type: 'REAPPLY_AFTER_MONTHS',
     title: '서류 지참 영업점 방문 · 현행 절차',
     lines: [
       `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. (사유: ${reasonText})`,
-      '현행 절차대로 아래 서류를 지참해 영업점을 방문하면 직원이 매장 실재 3단계(국세청·위치·인허가) 결과와 서류를 보고 판단합니다.',
+      '아래 서류를 지참해 영업점을 방문하면 직원이 매장 실재 3단계 결과와 함께 보고 판단합니다.',
       when,
     ],
     remedies: [], docs: CURRENT_PROCESS_DOCS.slice(), reapplyFrom: from?.ym || null,
@@ -448,7 +448,7 @@ function getVerdict(totalScore, {
   // ② 네거티브 게이트 BLOCK — 점수 무관 차단
   if (gate?.level === 'BLOCK') {
     return withUi('REJECTED', {
-      description: `위험 신호가 확인되었습니다 (${gate.summary}). 자동해제되지 않습니다.`,
+      description: `위험 신호가 확인되었습니다. (${gate.summary})`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
       nextStep: nextStepRejected('GATE_BLOCK', gate),
@@ -459,7 +459,7 @@ function getVerdict(totalScore, {
   const elig = eligibility || checkEligibility({ nts: ntsResult, sales: salesResult });
   if (!elig.eligible) {
     return withUi('INELIGIBLE', {
-      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. 현행 서류를 지참해 영업점을 방문합니다.`,
+      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다.`,
       reasons: elig.reasons,
       businessMonths: elig.businessMonths,
       salesMonths: elig.salesMonths,
@@ -470,7 +470,7 @@ function getVerdict(totalScore, {
   // ④ 네거티브 게이트 HOLD — 점수 무관 보류 (신호가 해소되기 전엔 자동해제 안 함)
   if (gate?.level === 'HOLD') {
     return withUi('PENDING', {
-      description: `${gate.summary}. 해소 전에는 자동해제되지 않습니다.`,
+      description: `${gate.summary}.`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
       nextStep: nextStepPending(remedyCtx),
@@ -484,18 +484,18 @@ function getVerdict(totalScore, {
     if (fdsScore >= RULES.FDS_NORMAL_THRESHOLD) reasons.push(`카드매출 FDS ${fdsScore}/40점`);
     if (elig.businessMonths != null) reasons.push(`업력 ${(elig.businessMonths / 12).toFixed(1)}년`);
     return withUi('APPROVED', {
-      description: `정상 운영 가맹점으로 확인되었습니다. 한도제한계좌가 즉시 해제됩니다.${reasons.length ? ` (${reasons.join(' · ')})` : ''}`,
+      description: `정상 운영 가맹점으로 확인되었습니다.${reasons.length ? ` (${reasons.join(' · ')})` : ''}`,
       nextStep: nextStepApproved(),
     });
   }
   if (totalScore >= RULES.PENDING_CUT) {
     return withUi('PENDING', {
-      description: `총점 ${totalScore}점. 자동해제 기준(${RULES.APPROVED_CUT}점) 미달 항목이 있어 자동해제되지 않습니다. 미달 항목의 서류를 지참해 영업점을 방문합니다.`,
+      description: `총점 ${totalScore}점. 자동해제 기준 ${RULES.APPROVED_CUT}점에 미달했습니다.`,
       nextStep: nextStepPending(remedyCtx),
     });
   }
   return withUi('REJECTED', {
-    description: '검증 기준을 충족하지 못했습니다. 자동해제되지 않습니다.',
+    description: '검증 기준을 충족하지 못했습니다.',
     nextStep: nextStepRejected('SCORE_BELOW_CUT'),
   });
 }
