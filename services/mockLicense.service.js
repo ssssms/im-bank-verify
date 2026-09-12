@@ -132,6 +132,8 @@ const DATA_GO_KR_LICENSE_APIS = [
   { url: '/1741000/fitness_centers/info', name: '체력단련장업' },
   { url: '/1741000/clinics/info', name: '의원' },
   { url: '/1741000/hospitals/info', name: '병원' },
+  // 2026-09-12 추가 — 그린헬스(사우나) 용. 목욕장업 API 는 endpoint 존재 확인(403 SERVICE_KEY_IS_NOT_REGISTERED), 활용신청 전엔 조용히 제외
+  { url: '/1741000/public_baths/info', name: '목욕장업' },
 ];
 
 // 주소에서 매칭용 키워드 추출 (구/동/로 단위)
