@@ -250,13 +250,13 @@ function calcHometaxScore(hometaxResult) {
 //
 // [nextStep] 판정별 다음 절차. 프론트 NextStep 패널이 그대로 그린다.
 //   [2026-09-12] 사람이 개입하는 경로를 현실에 맞춤 — 본부 원격 확인·실사·재검증 예약은 지금 은행 인프라에 없는 절차라 전부 삭제.
-//   [2026-09-12 저녁] 영업점 직원용 틀(사용자 결정): 앱 비대면 계좌 개설 시 같은 검증이 자동 실행돼 즉시 해제 여부가 결정된다.
-//   미해제 고객은 현행대로 서류를 들고 영업점을 방문하고, 직원은 이 화면(근거)과 서류를 보고 승인·부결한다. 그래서 nextStep 은
-//   "영업점 확인 사항": 무엇이 이미 확인됐고 무엇만 서류로 보면 되는지 + 고객에게 설명할 문장. 승인·부결 기록 기능은 없다.
-//   AUTO_RELEASE         승인 — 앱에서 즉시 자동해제, 영업점 조치 없음
-//   REAPPLY_AFTER_REMEDY 보류(자동해제 기준 미달) — 미달 항목 ↔ 검토할 서류 표(통과 항목은 다시 안 봄), FDS 패턴 이상은 서류로 대체 불가
-//   RELEASE_UNAVAILABLE  거절 — 부결 안내(서류로 바뀌지 않음) + 고객 안내 문장
-//   REAPPLY_AFTER_MONTHS 보류(카드매출 6개월 미만) — 현행 서류 5종 검토 + 고객 안내 「빠르면 YYYY년 M월 이후 다시 검증하면 자동해제 대상」(reapplyFrom)
+//   [2026-09-12 저녁 확정] 이 화면은 앱 비대면 계좌 개설 시 보이지 않게 도는 자동해제 과정을 눈으로 보이게 펼친 것(사용자: "원래는 결과만 나온다.
+//   시연이 안 되니 눈에 보이는 서비스처럼 만든 것"). 결과는 둘뿐 — 자동해제 / 서류 지참 영업점 방문(직원이 이 결과와 서류를 보고 판단·부결).
+//   nextStep 은 현재형으로 그 결과를 말한다. 본부·실사·재검증 예약·승인부결 기록 같은 없는 인프라는 쓰지 않는다.
+//   AUTO_RELEASE         승인 — 즉시 해제, 서류·영업점 방문 없음(앱에서는 개설 직후 이 결과가 바로 적용)
+//   REAPPLY_AFTER_REMEDY 보류(자동해제 기준 미달) — 미달 항목 ↔ 지참 서류 표(통과 항목은 다시 안 봄), FDS 패턴 이상은 서류로 대체 불가
+//   RELEASE_UNAVAILABLE  거절 — 서류로 바뀌지 않는 사유 + 해소 후 다시 조회
+//   REAPPLY_AFTER_MONTHS 보류(카드매출 6개월 미만) — 현행 서류 5종 지참 영업점 방문 + 「빠르면 YYYY년 M월 이후 다시 조회하면 자동해제 대상」(reapplyFrom)
 
 const VERDICT_UI = {
   APPROVED:   { label: '한도 해제 승인',            color: '#00C3A5' },
@@ -274,7 +274,7 @@ const CURRENT_PROCESS_DOCS = [
   '(전자)세금계산서 또는 매출 증빙 자료',
 ];
 
-const NO_DOC_SUBSTITUTE = '서류로 대체 불가 · 부결 사유로 고객에게 설명';
+const NO_DOC_SUBSTITUTE = '서류로 대체 불가 · 거래 패턴이 정상화된 뒤 다시 조회';
 const LOCATION_REMEDY   = '임대차계약서 또는 간판·매장 사진';
 
 // 보류 시 잃은 점수 단계별 검토 서류 — 영업점 직원이 그 항목만 서류로 확인한다(통과한 항목은 다시 안 봄).
@@ -345,10 +345,10 @@ function reapplyFrom(elig, ntsResult) {
 function nextStepApproved() {
   return {
     type: 'AUTO_RELEASE',
-    title: '영업점 조치 없음 · 앱에서 자동해제',
+    title: '자동해제 · 서류·영업점 방문 없음',
     lines: [
-      '앱 계좌 개설 시 자동 검증을 통과해 한도제한이 즉시 해제된 사업자입니다. 영업점에서 할 일은 없습니다.',
-      '해제 완료 시 고객 연락처로 SMS 알림이 발송됩니다.',
+      '4단계 검증을 통과해 한도제한계좌가 즉시 해제됩니다. 서류 제출도 영업점 방문도 없습니다.',
+      '앱 비대면 계좌 개설 시에는 이 검증이 개설 직후 자동으로 실행되어 이 결과가 바로 적용되고, 고객 연락처로 SMS 알림이 발송됩니다.',
     ],
     remedies: [], docs: [], reverifyAvailable: false,
   };
@@ -358,14 +358,14 @@ function nextStepPending(ctx) {
   const RULES = getRules();
   const gate = ctx?.gate;
   const first = gate?.level === 'HOLD'
-    ? `위험 신호(${gate.summary})가 확인되어 앱에서 자동해제되지 않았습니다. 서류로 대체되지 않는 항목입니다.`
-    : `자동해제 기준(${RULES.APPROVED_CUT}점) 미달 항목이 있어 앱에서 해제되지 않았습니다. 아래 미달 항목만 서류로 확인하면 됩니다.`;
+    ? `위험 신호(${gate.summary})가 확인되어 자동해제되지 않습니다. 서류로 대체되지 않는 항목입니다.`
+    : `자동해제 기준(${RULES.APPROVED_CUT}점) 미달 항목이 있어 자동해제되지 않습니다. 아래 미달 항목의 서류를 지참해 영업점을 방문하면 직원이 이 결과와 서류를 보고 판단합니다.`;
   return {
     type: 'REAPPLY_AFTER_REMEDY',
-    title: '영업점 확인 · 서류 검토 후 판단',
+    title: '서류 지참 영업점 방문 · 미달 항목만 확인',
     lines: [
       first,
-      '이미 통과한 항목은 다시 볼 필요가 없습니다. 등록 서류(사업자등록증·부가가치세 증명)는 요구하지 않습니다.',
+      '이미 통과한 항목은 다시 확인하지 않습니다. 등록 서류(사업자등록증·부가가치세 증명)는 요구하지 않습니다.',
     ],
     remedies: buildRemedies(ctx), docs: [],
   };
@@ -375,10 +375,10 @@ function nextStepRejected(kind, gate) {
   if (kind === 'NTS_INACTIVE') {
     return {
       type: 'RELEASE_UNAVAILABLE', reasonCode: kind,
-      title: '영업점 확인 · 부결 안내',
+      title: '자동해제 불가 · 해제 대상 아님',
       lines: [
         '국세청 사업자등록 상태가 휴업 또는 폐업으로 확인되어 한도 해제 대상이 아닙니다.',
-        '고객 안내: 실제와 다르면 홈택스에서 사업자등록 상태를 정정한 뒤 다시 검증하면 됩니다.',
+        '영업점을 방문해도 서류로 바뀌지 않는 판정입니다. 실제와 다르면 홈택스에서 사업자등록 상태를 정정한 뒤 다시 조회합니다.',
       ],
       remedies: [], docs: [],
     };
@@ -386,20 +386,20 @@ function nextStepRejected(kind, gate) {
   if (kind === 'GATE_BLOCK') {
     return {
       type: 'RELEASE_UNAVAILABLE', reasonCode: kind,
-      title: '영업점 확인 · 부결 안내',
+      title: '자동해제 불가 · 서류로 바뀌지 않음',
       lines: [
-        `부정 신호가 확인되어 자동해제되지 않았습니다. (${gate?.summary || '위험 신호'})`,
-        '서류로 바뀌지 않는 판정입니다. 고객 안내: 해당 신호가 해소된 뒤 다시 검증하면 최신 데이터로 다시 판정됩니다.',
+        `부정 신호가 확인되어 자동해제되지 않습니다. (${gate?.summary || '위험 신호'})`,
+        '영업점을 방문해도 서류로 바뀌지 않는 판정입니다. 직원은 이 사유를 고객에게 설명하고, 해당 신호가 해소된 뒤 다시 조회하면 최신 데이터로 다시 판정됩니다.',
       ],
       remedies: [], docs: [],
     };
   }
   return {
     type: 'RELEASE_UNAVAILABLE', reasonCode: 'SCORE_BELOW_CUT',
-    title: '영업점 확인 · 부결 안내',
+    title: '자동해제 불가 · 서류로 바뀌지 않음',
     lines: [
-      '자동 검증 기준에 크게 미달해 자동해제되지 않았습니다.',
-      '서류로 바뀌지 않는 판정입니다. 고객 안내: 매장 실재와 카드매출이 데이터로 확인되면 다시 검증할 수 있습니다.',
+      '자동 검증 기준에 크게 미달해 자동해제되지 않습니다.',
+      '영업점을 방문해도 서류로 바뀌지 않는 판정입니다. 매장 실재와 카드매출이 데이터로 확인된 뒤 다시 조회합니다.',
     ],
     remedies: [], docs: [],
   };
@@ -410,14 +410,14 @@ function nextStepIneligible(eligibility, ntsResult) {
   const reasonText = (eligibility?.reasons || []).map(r => r.label).join(' · ') || '카드매출 이력 없음';
   const from = reapplyFrom(eligibility, ntsResult);
   const when = from
-    ? `고객 안내: 빠르면 ${from.label}부터 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓여 다시 검증하면 자동해제 대상이 될 수 있습니다.`
-    : `고객 안내: 카드 가맹 후 카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓인 뒤 다시 검증하면 자동해제 대상이 될 수 있습니다.`;
+    ? `빠르면 ${from.label}부터 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓여 다시 조회하면 자동해제 대상이 될 수 있습니다.`
+    : `카드 가맹 후 카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓인 뒤 다시 조회하면 자동해제 대상이 될 수 있습니다.`;
   return {
     type: 'REAPPLY_AFTER_MONTHS',
-    title: '영업점 확인 · 현행 서류 검토',
+    title: '서류 지참 영업점 방문 · 현행 절차',
     lines: [
-      `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없었습니다. (사유: ${reasonText})`,
-      '현행 절차대로 아래 서류를 검토해 판단합니다. 매장 실재 3단계(국세청·위치·인허가) 결과는 판단 근거로 씁니다.',
+      `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. (사유: ${reasonText})`,
+      '현행 절차대로 아래 서류를 지참해 영업점을 방문하면 직원이 매장 실재 3단계(국세청·위치·인허가) 결과와 서류를 보고 판단합니다.',
       when,
     ],
     remedies: [], docs: CURRENT_PROCESS_DOCS.slice(), reapplyFrom: from?.ym || null,
@@ -459,7 +459,7 @@ function getVerdict(totalScore, {
   const elig = eligibility || checkEligibility({ nts: ntsResult, sales: salesResult });
   if (!elig.eligible) {
     return withUi('INELIGIBLE', {
-      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. 현행 서류로 검토합니다.`,
+      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. 현행 서류를 지참해 영업점을 방문합니다.`,
       reasons: elig.reasons,
       businessMonths: elig.businessMonths,
       salesMonths: elig.salesMonths,
@@ -490,7 +490,7 @@ function getVerdict(totalScore, {
   }
   if (totalScore >= RULES.PENDING_CUT) {
     return withUi('PENDING', {
-      description: `총점 ${totalScore}점. 자동해제 기준(${RULES.APPROVED_CUT}점) 미달 항목이 있어 앱에서 해제되지 않았습니다. 미달 항목만 서류로 확인합니다.`,
+      description: `총점 ${totalScore}점. 자동해제 기준(${RULES.APPROVED_CUT}점) 미달 항목이 있어 자동해제되지 않습니다. 미달 항목의 서류를 지참해 영업점을 방문합니다.`,
       nextStep: nextStepPending(remedyCtx),
     });
   }
