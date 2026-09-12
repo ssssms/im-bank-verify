@@ -15,7 +15,7 @@
  *   1293284715 PENDING     55  6개월 매출 채움(mock 예외 수정) → 보류(자동해제 기준 미달) 시연
  *   5142691320 INELIGIBLE  60  업력 4개월 + 카드매출 없음 → 보류(카드매출 6개월 미만, 다시 신청 시점 안내)
  * [2026-09-12] nextStep 유형 개명: REMOTE_REVIEW→REAPPLY_AFTER_REMEDY · BRANCH_INSPECTION→RELEASE_UNAVAILABLE · BRANCH_CURRENT_PROCESS→REAPPLY_AFTER_MONTHS
- *   6211957068 REJECTED    75  게이트 BLOCK, 총점 불변(기준선 75)
+ *   5555555555 REJECTED    75  게이트 BLOCK, 총점 불변(기준선 75)
  *   2144028530 REJECTED     0  폐업, 총점 불변(기준선 0)
  */
 require('dotenv').config();
@@ -35,7 +35,7 @@ const CASES = [
   { num: '2208162346', label: '우량 사업자',              verdict: 'APPROVED',   total: 100, gate: 'NONE',  next: 'AUTO_RELEASE',           baselineTotal: 100 },
   { num: '1293284715', label: '기존 사업자·규모 약함',     verdict: 'PENDING',    total: 55,  gate: 'WATCH', next: 'REAPPLY_AFTER_REMEDY',   baselineTotal: null },
   { num: '5142691320', label: '신설(업력 4개월·카드매출 없음)', verdict: 'INELIGIBLE', total: 60, gate: 'NONE', next: 'REAPPLY_AFTER_MONTHS',   baselineTotal: null },
-  { num: '6211957068', label: '가장매출 의심(게이트 BLOCK)', verdict: 'REJECTED',   total: 75,  gate: 'BLOCK', next: 'RELEASE_UNAVAILABLE',    baselineTotal: 75 },
+  { num: '5555555555', label: '가장매출 의심(게이트 BLOCK)', verdict: 'REJECTED',   total: 75,  gate: 'BLOCK', next: 'RELEASE_UNAVAILABLE',    baselineTotal: 75 },
   { num: '2144028530', label: '폐업 사업자',              verdict: 'REJECTED',   total: 0,   gate: 'NONE',  next: 'RELEASE_UNAVAILABLE',    baselineTotal: 0 },
 ];
 

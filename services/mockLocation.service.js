@@ -45,7 +45,7 @@ function regionMatch(address, region) {
 }
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '5555555555']);
 
 // ── Mock 데이터 ────────────────────────────────────────────────
 const MOCK_LOCATION_DATA = {
@@ -54,7 +54,7 @@ const MOCK_LOCATION_DATA = {
   '5142691320': { matched: true,  confidence: 'HIGH',   address: '대구광역시 수성구 동대구로 100', latitude: 35.8562, longitude: 128.6327, matchedStoreName: '새로운분식', step1: true, step2: true },
   '2144028530': { matched: false, confidence: 'NONE',   address: null, latitude: null, longitude: null, matchedStoreName: null, step1: false, step2: false },
   // 시나리오 E: 가장매출 의심 — 매장은 실재(위치·인허가 만점), 카드 흐름만 이상
-  '6211957068': { matched: true,  confidence: 'HIGH',   address: '부산광역시 해운대구 해운대해변로 200', latitude: 35.1587, longitude: 129.1604, matchedStoreName: '스마일카페', step1: true, step2: true },
+  '5555555555': { matched: true,  confidence: 'HIGH',   address: '부산광역시 해운대구 해운대해변로 200', latitude: 35.1587, longitude: 129.1604, matchedStoreName: '스마일카페', step1: true, step2: true },
 };
 
 // ── 1차: 네이버 지역 검색 (한국 사업장 DB, 이름 변형 처리 우수) ──

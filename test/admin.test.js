@@ -24,7 +24,7 @@ const PORT = Number(process.env.ADMIN_TEST_PORT) || 4097;
 const BASE = `http://localhost:${PORT}`;
 const H = { headers: { 'x-admin-token': process.env.ADMIN_TOKEN } };
 
-const EXPECTED = { '2208162346': ['APPROVED', 100], '1293284715': ['PENDING', 55], '5142691320': ['INELIGIBLE', 60], '6211957068': ['REJECTED', 75], '2144028530': ['REJECTED', 0] };
+const EXPECTED = { '2208162346': ['APPROVED', 100], '1293284715': ['PENDING', 55], '5142691320': ['INELIGIBLE', 60], '5555555555': ['REJECTED', 75], '2144028530': ['REJECTED', 0] };
 
 let pass = 0, fail = 0;
 function check(name, fn) {

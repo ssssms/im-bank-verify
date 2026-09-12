@@ -20,7 +20,7 @@ const { getMerchantRegion } = require('./bcData.service');
 const { rankCandidates, parseAddress, synonymVariants } = require('../utils/licenseMatch'); // 사업체 특정(상호·주소·상태 채점, 2026-09-11) // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '5555555555']);
 
 // ── 인허가 업종 서비스 코드 ────────────────────────────────────
 const LICENSE_SERVICE_CODES = [
@@ -68,7 +68,7 @@ const MOCK_LICENSE_DATA = {
     detail: '일반음식점 영업허가 유효 (2025.09 취득) — 새로운분식',
   },
   // 시나리오 E: 가장매출 의심 — 인허가는 정상(매장 실재), 카드 흐름만 이상
-  '6211957068': {
+  '5555555555': {
     hasLicense: true,
     licenseType: '휴게음식점',
     licenseStatus: '영업',

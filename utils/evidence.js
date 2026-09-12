@@ -20,7 +20,7 @@ const { calcBusinessYears } = require('./businessAge');
 const { ALARM_RULES } = require('./negativeGate');
 const alarmLabel = key => ALARM_RULES.find(r => r.key === key)?.label || key;
 
-const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '5555555555']);
 
 const SOURCE_LABEL = {
   LIVE:      '실제 연동',

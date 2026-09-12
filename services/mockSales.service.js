@@ -14,7 +14,7 @@ const axios = require('axios');
 const { getBcSales } = require('./bcData.service'); // BC카드 실데이터 샘플 (2026-09-10, 파일 없으면 항상 null)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '5555555555']);
 
 // ── 인허가 업종 서비스 코드 (localdata.go.kr) ─────────────────
 const LICENSE_CODES = [
@@ -76,7 +76,7 @@ const DEMO_SERIES = {
   // 월 영업일 2~3일 · 순고객 9명이 260건 결제(비율 0.09) · 동일금액 반복 72%
   // → fdsEngine ④ 3종 동시 탐지(감점 6 → riskAlert) + BC 알람 「불량가맹점 등록」 → 게이트 BLOCK.
   // 매장 실재(위치·인허가)는 만점이라 총점 75(PENDING 구간)인데도 점수 무관 REJECTED — 게이트 시연용.
-  '6211957068': {
+  '5555555555': {
     dataType: 'CARD_ONLY', etaxCount: 0,
     industryAvgSales: 2500000, repeatedAmountRatio: 0.72,
     alarms: { badMerchantRegistered: true }, // BC 배치 알람 자리(negativeGate ALARM_RULES) — 시연용 Mock
