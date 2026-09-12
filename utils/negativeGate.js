@@ -13,10 +13,17 @@
  * 이 게이트는 점수를 1점도 더하거나 빼지 않는다. 총점 100점·4단계 구조와 제안서
  * 배점표는 그대로 두고, 판정(verdict)만 오버라이드한다.
  *
- * [3단계]
- *   BLOCK : 즉시 차단  → 점수 무관 REJECTED (영업점 방문)
- *   HOLD  : 보류        → 점수 무관 PENDING  (사람이 봐야 하는 신호)
+ * [3단계 + 참고]
+ *   BLOCK : 즉시 차단  → 점수 무관 REJECTED
+ *   HOLD  : 보류        → 점수 무관 PENDING
  *   WATCH : 주의        → 판정은 그대로, 사유만 기록·표시
+ *   INFO  : 참고        → 판정·게이트 레벨에 전혀 영향 없음. 화면엔 「신용·경영 참고」로만 표시 (2026-09-12)
+ *
+ * [2026-09-12 사용자 결정 — 신용·경영 신호는 판정에서 뺀다]
+ *   이 서비스의 목적은 "실제로 영업하는 사업자인가"(가장 사업자·대포통장 방지)이지 "망할 수 있는 사업자인가"가 아니다.
+ *   장사가 안 돼 연체·압류가 생긴 사업자는 착한 사업자가 아닌 게 아니라 장사가 안 될 뿐이다. 그래서
+ *   사고코드·고액/다수 연체·압류 입금보류·역환 장기 보류 4종은 INFO 로 내려 판정에 반영하지 않는다(category 'CREDIT').
+ *   부정·가장 신호(명의대여·사업자번호 오류·불량가맹점·대외기관 적발·약관 위반·FDS 고위험·비정상운영·사위 민원)는 그대로.
  *
  * [BC 데이터 연동]
  * sales.alarms 는 BC카드 월배치의 알람 항목을 담는 자리다. 배치 수신 전에는
@@ -26,7 +33,8 @@
  */
 
 // ── BC 알람 기반 규칙 (배치 수신 시 자동 활성화) ─────────────
-// [{ key, level, label, detail }] — sales.alarms[key] 가 truthy 면 발동
+// [{ key, level, label, detail, category? }] — sales.alarms[key] 가 truthy 면 발동. category 'CREDIT' = 신용·경영 참고(INFO)
+const CREDIT_NOTE = ' (신용·경영 참고 — 이 서비스는 실영위만 판단하므로 판정에 반영하지 않습니다)';
 const ALARM_RULES = [
   // ── BLOCK : 즉시 차단 ──────────────────────────────────────
   {
@@ -68,9 +76,9 @@ const ALARM_RULES = [
     // BC: 가맹점FDS스코어고득점_불량률10%이상
   },
   {
-    key: 'accidentCode', level: 'HOLD',
+    key: 'accidentCode', level: 'INFO', category: 'CREDIT',
     label: '사고코드 등재',
-    detail: '최근 6개월 내 신용에 영향을 주는 사고코드가 등재된 이력이 있습니다.',
+    detail: '최근 6개월 내 신용에 영향을 주는 사고코드가 등재된 이력이 있습니다.' + CREDIT_NOTE,
     // BC: 최근6개월사고코드등재여부
   },
   {
@@ -86,21 +94,21 @@ const ALARM_RULES = [
     // BC: 12개월내 가맹점사위 관련 민원 발생 이력 건수
   },
   {
-    key: 'overdueHolder', level: 'HOLD',
+    key: 'overdueHolder', level: 'INFO', category: 'CREDIT',
     label: '고액·다수 연체 보유',
-    detail: '카드사 FDS에 고액 또는 다수 연체 보유로 선정된 이력이 있습니다.',
+    detail: '카드사 FDS에 고액 또는 다수 연체 보유로 선정된 이력이 있습니다.' + CREDIT_NOTE,
     // BC: 1개월내 …[R01_고액연체보유] / [R02_다수연체보유]
   },
   {
-    key: 'chargebackHold', level: 'HOLD',
+    key: 'chargebackHold', level: 'INFO', category: 'CREDIT',
     label: '역환 입금보류 장기 미해제',
-    detail: '역환으로 인한 입금보류가 90일 이상 해제되지 않았습니다.',
+    detail: '역환으로 인한 입금보류가 90일 이상 해제되지 않았습니다.' + CREDIT_NOTE,
     // BC: 24개월 내 역환으로 인한 입금보류 90일이상 경과 미해제 건수
   },
   {
-    key: 'seizureHold', level: 'HOLD',
+    key: 'seizureHold', level: 'INFO', category: 'CREDIT',
     label: '압류 입금보류 미해제',
-    detail: '기관 또는 법원·채권자 압류를 사유로 한 입금보류가 해제되지 않았습니다.',
+    detail: '기관 또는 법원·채권자 압류를 사유로 한 입금보류가 해제되지 않았습니다.' + CREDIT_NOTE,
     // BC: 24개월내 기관압류로 인한 입금보류 미해제 건수(FF00008) / 24개월내 법원및채권자압류로 인한 입금보류 미해제 건수(FF00024)
     // [2026-09-10 추가] BC 샘플의 알람 이력 사례(도시어부)가 이 항목으로 선정돼 있어 매핑. 56항목 정식 레이아웃엔 없는 열이라 매출 샘플 10곳엔 발동하지 않는다.
   },
@@ -126,7 +134,7 @@ const ALARM_RULES = [
   },
 ];
 
-const LEVEL_RANK = { NONE: 0, WATCH: 1, HOLD: 2, BLOCK: 3 };
+const LEVEL_RANK = { NONE: 0, INFO: 0, WATCH: 1, HOLD: 2, BLOCK: 3 };
 
 /**
  * 네거티브 게이트 평가
@@ -145,7 +153,7 @@ function evaluateGate({ sales, salesScore, noDataCase } = {}) {
   const alarms = sales?.alarms || {};
   for (const rule of ALARM_RULES) {
     if (alarms[rule.key]) {
-      reasons.push({ code: rule.key, level: rule.level, label: rule.label, detail: rule.detail, source: 'BC_ALARM' });
+      reasons.push({ code: rule.key, level: rule.level, label: rule.label, detail: rule.detail, source: 'BC_ALARM', ...(rule.category ? { category: rule.category } : {}) });
     }
   }
 
@@ -188,11 +196,12 @@ function evaluateGate({ sales, salesScore, noDataCase } = {}) {
   const override = level === 'BLOCK' ? 'REJECTED' : level === 'HOLD' ? 'PENDING' : null;
 
   const topReasons = reasons.filter(r => r.level === level);
+  const infoCount = reasons.filter(r => r.level === 'INFO').length;
   const summary = level === 'NONE'
-    ? '위험 신호 없음'
+    ? (infoCount ? `위험 신호 없음 (신용·경영 참고 ${infoCount}건)` : '위험 신호 없음')
     : topReasons.map(r => r.label).join(' · ');
 
-  return { level, override, reasons, summary };
+  return { level, override, reasons, summary, infoCount };
 }
 
 module.exports = { evaluateGate, ALARM_RULES };
