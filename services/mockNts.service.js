@@ -13,7 +13,7 @@
 const axios = require('axios');
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
 
 // ── Mock 데이터 테이블 ─────────────────────────────────────────
 // 시연 시나리오별 사업자번호 → 결과 매핑
@@ -26,7 +26,7 @@ function monthsAgoISO(n) {
 
 const MOCK_BUSINESSES = {
   // 시나리오 A: 우량 사업자 (고득점 → 승인)
-  '1234567890': {
+  '2208162346': {
     businessStatus: 'ACTIVE',
     businessType: '음식업',
     registrationDate: '2019-03-15',
@@ -34,7 +34,7 @@ const MOCK_BUSINESSES = {
     ceoName: '김*진',
   },
   // 시나리오 B: 활동 중이지만 데이터 부족 (중간 점수 → 보류)
-  '9876543210': {
+  '1293284715': {
     businessStatus: 'ACTIVE',
     businessType: '소매업',
     registrationDate: '2023-11-01',
@@ -43,7 +43,7 @@ const MOCK_BUSINESSES = {
   },
   // 시나리오 C: 신설 사업자 — 업력 4개월 + 카드매출 없음 → 보류(INELIGIBLE, 카드매출 6개월 미만) → 다시 신청 시점 안내
   // [2026-09-08 수정] 등록일을 '오늘 기준 4개월 전'으로 고정 산출해 시연일이 지나도 업력이 6개월 미만으로 유지된다.
-  '2222222222': {
+  '5142691320': {
     businessStatus: 'ACTIVE',
     businessType: '음식업',
     registrationDate: monthsAgoISO(4),
@@ -51,7 +51,7 @@ const MOCK_BUSINESSES = {
     ceoName: '최*영',
   },
   // 시나리오 E: 가장매출(카드깡) 의심 — 매장 실재 60점 만점인데 카드 흐름이 이상 → 게이트 차단
-  '5555555555': {
+  '6211957068': {
     businessStatus: 'ACTIVE',
     businessType: '음식업',
     registrationDate: '2025-01-10',
@@ -59,7 +59,7 @@ const MOCK_BUSINESSES = {
     ceoName: '정*우',
   },
   // 시나리오 D: 폐업 사업자 (저점수 → 거절)
-  '1111111111': {
+  '2144028530': {
     businessStatus: 'CLOSED',
     businessType: '서비스업',
     registrationDate: '2020-05-20',

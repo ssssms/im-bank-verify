@@ -10,18 +10,18 @@
 const axios = require('axios');
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320']);
 
 // ── Mock 데이터 ───────────────────────────────────────────────
 const MOCK_PENSION_DATA = {
   // 우량 사업자: 직원 12명 (30점 만점)
-  '1234567890': { employeeCount: 12, insuredSince: '2019-04', monthlyPayment: 1250000 },
+  '2208162346': { employeeCount: 12, insuredSince: '2019-04', monthlyPayment: 1250000 },
   // 중간 사업자: 직원 3명 (10점)
-  '9876543210': { employeeCount: 3, insuredSince: '2023-12', monthlyPayment: 320000 },
+  '1293284715': { employeeCount: 3, insuredSince: '2023-12', monthlyPayment: 320000 },
   // 신설 사업자: 직원 없음 (0점)
-  '2222222222': { employeeCount: 0, insuredSince: null, monthlyPayment: 0 },
+  '5142691320': { employeeCount: 0, insuredSince: null, monthlyPayment: 0 },
   // 폐업 사업자: 직원 없음 (0점)
-  '1111111111': { employeeCount: 0, insuredSince: null, monthlyPayment: 0 },
+  '2144028530': { employeeCount: 0, insuredSince: null, monthlyPayment: 0 },
 };
 
 /**

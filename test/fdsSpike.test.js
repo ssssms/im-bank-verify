@@ -49,7 +49,7 @@ t('개업 3개월째에 전달들의 3배(0/0/0/100만/120만/330만) → 직전
   assert.ok(spikeFlag(r) && spikeFlag(r).includes('직전 2개월 평균의 3.0배'), spikeFlag(r));
 });
 
-t('영업 중 급증(90/80/100/120/150/3,800만, 5555555555 형) → 종전과 같은 직전 3개월 평균 30.8배', () => {
+t('영업 중 급증(90/80/100/120/150/3,800만, 6211957068 형) → 종전과 같은 직전 3개월 평균 30.8배', () => {
   const r = scoreFds(series([900000, 800000, 1000000, 1200000, 1500000, 38000000]));
   assert.strictEqual(Math.round(r.metrics.spikeRatio * 10) / 10, 30.8);
   assert.strictEqual(r.metrics.spikeBaseMonths, 3);

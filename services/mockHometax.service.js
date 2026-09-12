@@ -18,7 +18,7 @@
  */
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320']);
 
 // ── Mock 데이터 ───────────────────────────────────────────────
 // vatFilingCount: 최근 4분기 부가세 신고 횟수 (만점 4회)
@@ -28,7 +28,7 @@ const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222
 // status: 'NORMAL'(정상) / 'PARTIAL'(일부 누락) / 'NEW'(신설 데이터 부족) / 'NONE'(이력 없음)
 const MOCK_HOMETAX_DATA = {
   // 우량 사업자: 모든 신고 정상, 체납 없음 → 만점
-  '1234567890': {
+  '2208162346': {
     hasData: true,
     status: 'NORMAL',
     vatFilingCount: 4,
@@ -39,7 +39,7 @@ const MOCK_HOMETAX_DATA = {
     detail: '최근 4분기 부가세 신고 정상 · 전자세금계산서 87건 · 매출 4.8억 · 체납 없음',
   },
   // 기존 데이터 부족 사업자: 매출 급감 + 신고 누락 → 부분 점수 (PENDING 보호)
-  '9876543210': {
+  '1293284715': {
     hasData: true,
     status: 'PARTIAL',
     vatFilingCount: 2,
@@ -50,7 +50,7 @@ const MOCK_HOMETAX_DATA = {
     detail: '최근 4분기 중 2분기만 부가세 신고 · 전자세금계산서 8건 · 매출 급감 의심 (3,800만)',
   },
   // 신설 사업자: 신고 이력 1회 (개업 초기) → 부분 점수
-  '2222222222': {
+  '5142691320': {
     hasData: true,
     status: 'NEW',
     vatFilingCount: 1,
@@ -61,7 +61,7 @@ const MOCK_HOMETAX_DATA = {
     detail: '신설 사업자 — 부가세 신고 이력 1회 · 전자세금계산서 4건 (검증 데이터 부족)',
   },
   // 폐업 사업자: 신고 이력 없음
-  '1111111111': {
+  '2144028530': {
     hasData: false,
     status: 'NONE',
     vatFilingCount: 0,

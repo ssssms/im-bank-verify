@@ -14,7 +14,7 @@ const axios = require('axios');
 const { getBcSales } = require('./bcData.service'); // BC카드 실데이터 샘플 (2026-09-10, 파일 없으면 항상 null)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
 
 // ── 인허가 업종 서비스 코드 (localdata.go.kr) ─────────────────
 const LICENSE_CODES = [
@@ -45,7 +45,7 @@ const LICENSE_CODES = [
 // 시연용 6개월 시계열 [매출액, 매출건수, 영업일수, 순고객수] — 오래된 달 → 최근 달
 const DEMO_SERIES = {
   // 우량 가맹점: 6개월 연속 · 월 180건 · 순고객 162명(비율 0.9) · 업종평균 110% → FDS 40점
-  '1234567890': {
+  '2208162346': {
     dataType: 'CARD_AND_ETAX', etaxCount: 24,
     industryAvgSales: 11363636, repeatedAmountRatio: 0.08,
     rows: [
@@ -60,7 +60,7 @@ const DEMO_SERIES = {
   // 기존 데이터 부족 사업자: 6개월 연속 매출(판단 자격 충족)이지만 규모·순고객이 약함 ·
   // 월 25건 · 순고객 11명(비율 0.42, 감소 추세) · 업종평균 45% · 동일금액 반복 45% → FDS 23점, 총점 55 → PENDING
   // [2026-09-08 수정] 종전 6개월 중 4개월(2개월 공백)은 새 정책에서 INELIGIBLE 이 되어 '보류' 시연이 사라지므로 6개월을 채움.
-  '9876543210': {
+  '1293284715': {
     dataType: 'CARD_ONLY', etaxCount: 0,
     industryAvgSales: 6666667, repeatedAmountRatio: 0.45,
     rows: [
@@ -76,7 +76,7 @@ const DEMO_SERIES = {
   // 월 영업일 2~3일 · 순고객 9명이 260건 결제(비율 0.09) · 동일금액 반복 72%
   // → fdsEngine ④ 3종 동시 탐지(감점 6 → riskAlert) + BC 알람 「불량가맹점 등록」 → 게이트 BLOCK.
   // 매장 실재(위치·인허가)는 만점이라 총점 75(PENDING 구간)인데도 점수 무관 REJECTED — 게이트 시연용.
-  '5555555555': {
+  '6211957068': {
     dataType: 'CARD_ONLY', etaxCount: 0,
     industryAvgSales: 2500000, repeatedAmountRatio: 0.72,
     alarms: { badMerchantRegistered: true }, // BC 배치 알람 자리(negativeGate ALARM_RULES) — 시연용 Mock
@@ -204,7 +204,7 @@ function getMockSalesData(businessNumber) {
       ...(demo.alarms ? { alarms: demo.alarms } : {}), // BC 알람 Mock(게이트 시연) — 없으면 필드 자체를 안 만든다
     };
   }
-  // 시연번호 중 매출 없는 케이스 (신설 2222222222 / 폐업 1111111111)
+  // 시연번호 중 매출 없는 케이스 (신설 5142691320 / 폐업 2144028530)
   if (DEMO_NUMBERS.has(businessNumber)) return { ...NO_SALES };
 
   return generateSeededSales(businessNumber);

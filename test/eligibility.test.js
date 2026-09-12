@@ -56,7 +56,7 @@ t('카드 가맹점 미등록(hasData=false) → NO_CARD_DATA (매출 월수 사
   assert.deepStrictEqual(r.reasons.map(x => x.code), ['NO_CARD_DATA']);
 });
 
-t('업력 4개월 + 카드매출 없음 → NEW_BUSINESS + NO_CARD_DATA (시연 2222222222 형태)', () => {
+t('업력 4개월 + 카드매출 없음 → NEW_BUSINESS + NO_CARD_DATA (시연 5142691320 형태)', () => {
   const r = checkEligibility({ nts: { registrationDate: monthsAgo(4) }, sales: { hasData: false, merchantRegistered: false, monthly: [] } });
   assert.deepStrictEqual(r.reasons.map(x => x.code), ['NEW_BUSINESS', 'NO_CARD_DATA']);
 });

@@ -20,7 +20,7 @@ const { getMerchantRegion } = require('./bcData.service');
 const { rankCandidates, parseAddress, synonymVariants } = require('../utils/licenseMatch'); // 사업체 특정(상호·주소·상태 채점, 2026-09-11) // BC 가맹점 등록 지역 — 샘플에 없으면 null (2026-09-11)
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222', '5555555555']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '6211957068']);
 
 // ── 인허가 업종 서비스 코드 ────────────────────────────────────
 const LICENSE_SERVICE_CODES = [
@@ -38,7 +38,7 @@ const LICENSE_SERVICE_CODES = [
 // ── Mock 데이터 ───────────────────────────────────────────────
 const MOCK_LICENSE_DATA = {
   // 시나리오 A: 음식업 허가 정상 (만점)
-  '1234567890': {
+  '2208162346': {
     hasLicense: true,
     licenseType: '일반음식점',
     licenseStatus: '영업',
@@ -48,7 +48,7 @@ const MOCK_LICENSE_DATA = {
     detail: '식품위생법 일반음식점 영업허가 유효 (2019.03 취득)',
   },
   // 시나리오 B: 신규 사업자 — 인허가 미취득 (신청 진행 중)
-  '9876543210': {
+  '1293284715': {
     hasLicense: false,
     licenseType: null,
     licenseStatus: '미취득',
@@ -58,7 +58,7 @@ const MOCK_LICENSE_DATA = {
     detail: '행정인허가 조회 결과 없음 (신규사업자 또는 인허가 불필요 업종)',
   },
   // 시나리오 C: 신설 사업자 — 인허가 신규 취득
-  '2222222222': {
+  '5142691320': {
     hasLicense: true,
     licenseType: '일반음식점',
     licenseStatus: '영업',
@@ -68,7 +68,7 @@ const MOCK_LICENSE_DATA = {
     detail: '일반음식점 영업허가 유효 (2025.09 취득) — 새로운분식',
   },
   // 시나리오 E: 가장매출 의심 — 인허가는 정상(매장 실재), 카드 흐름만 이상
-  '5555555555': {
+  '6211957068': {
     hasLicense: true,
     licenseType: '휴게음식점',
     licenseStatus: '영업',
@@ -78,7 +78,7 @@ const MOCK_LICENSE_DATA = {
     detail: '식품위생법 휴게음식점 영업신고 유효 (2025.01 취득) — 스마일카페',
   },
   // 시나리오 D: 폐업으로 허가 취소
-  '1111111111': {
+  '2144028530': {
     hasLicense: false,
     licenseType: '일반음식점',
     licenseStatus: '폐업',

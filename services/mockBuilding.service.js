@@ -25,12 +25,12 @@
 const axios = require('axios');
 
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
-const DEMO_NUMBERS = new Set(['1234567890', '9876543210', '1111111111', '2222222222']);
+const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320']);
 
 // ── Mock 데이터 ───────────────────────────────────────────────
 const MOCK_BUILDING_DATA = {
   // 시나리오 A: 상업용 건물 — 제2종근린생활시설 (식당에 적합)
-  '1234567890': {
+  '2208162346': {
     exists: true,
     mainPurpose: '제2종근린생활시설',
     purposeCode: '04000',
@@ -42,7 +42,7 @@ const MOCK_BUILDING_DATA = {
     detail: '건축물대장 확인 완료 — 제2종근린생활시설 (일반음식점 적합 용도)',
   },
   // 시나리오 B: 건물 있음, 주거+상업 복합 (소규모 사업장)
-  '9876543210': {
+  '1293284715': {
     exists: true,
     mainPurpose: '제1종근린생활시설',
     purposeCode: '03000',
@@ -54,7 +54,7 @@ const MOCK_BUILDING_DATA = {
     detail: '건축물대장 확인 완료 — 제1종근린생활시설 (소형 사업장)',
   },
   // 시나리오 C: 건물 정보 없음 (폐업 후 등재 말소 또는 주소 불일치)
-  '1111111111': {
+  '2144028530': {
     exists: false,
     mainPurpose: null,
     purposeCode: null,

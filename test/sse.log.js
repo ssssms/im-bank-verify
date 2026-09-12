@@ -12,11 +12,11 @@ const express = require('express');
 const PORT = Number(process.env.DEMO_TEST_PORT) || 4097;
 
 const DEFAULT_CASES = [
-  { num: '1234567890', name: '(주)맛있는식당' },
-  { num: '9876543210', name: '행복마트' },
-  { num: '2222222222', name: '새로운분식' },
-  { num: '5555555555', name: '스마일카페' },
-  { num: '1111111111', name: '옛날서비스' },
+  { num: '2208162346', name: '(주)맛있는식당' },
+  { num: '1293284715', name: '행복마트' },
+  { num: '5142691320', name: '새로운분식' },
+  { num: '6211957068', name: '스마일카페' },
+  { num: '2144028530', name: '옛날서비스' },
   { num: '5028107740', name: '또이스치킨' }, // 실제 번호 — CLAUDE.md 테스트 케이스
 ];
 

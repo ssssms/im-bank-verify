@@ -8,8 +8,8 @@
  * [확인 항목]
  *   인증: 토큰 없음/틀림 → 401
  *   범위: 승인 컷 101, 보류 컷 ≥ 승인 컷, 모르는 키 → 400 (아무것도 안 바뀜)
- *   시연 A: 9876543210(55 보류) — 보류 컷 50→60 → 거절 / 승인 컷 80→55 → 승인 / 사용자 제안 "보류 컷 50→40" 은 55 ≥ 40 이라 보류 유지(기록)
- *   시연 B: 1234567890(100 승인) — 순고객 기준 50→200 → 98점 승인 유지(③ 6→4) / 업력 필수 개월 6→96 → 보류(카드매출 6개월 미만, INELIGIBLE)
+ *   시연 A: 1293284715(55 보류) — 보류 컷 50→60 → 거절 / 승인 컷 80→55 → 승인 / 사용자 제안 "보류 컷 50→40" 은 55 ≥ 40 이라 보류 유지(기록)
+ *   시연 B: 2208162346(100 승인) — 순고객 기준 50→200 → 98점 승인 유지(③ 6→4) / 업력 필수 개월 6→96 → 보류(카드매출 6개월 미만, INELIGIBLE)
  *   이력: { at, key, from, to } 가 쌓이고, reset 후 5건 기대값 복원
  */
 require('dotenv').config();
@@ -24,7 +24,7 @@ const PORT = Number(process.env.ADMIN_TEST_PORT) || 4097;
 const BASE = `http://localhost:${PORT}`;
 const H = { headers: { 'x-admin-token': process.env.ADMIN_TOKEN } };
 
-const EXPECTED = { '1234567890': ['APPROVED', 100], '9876543210': ['PENDING', 55], '2222222222': ['INELIGIBLE', 60], '5555555555': ['REJECTED', 75], '1111111111': ['REJECTED', 0] };
+const EXPECTED = { '2208162346': ['APPROVED', 100], '1293284715': ['PENDING', 55], '5142691320': ['INELIGIBLE', 60], '6211957068': ['REJECTED', 75], '2144028530': ['REJECTED', 0] };
 
 let pass = 0, fail = 0;
 function check(name, fn) {
@@ -86,47 +86,47 @@ async function run() {
     const snapAfterBad = await get();
     check('거부된 요청은 아무것도 안 바꿈', () => assert.ok(snapAfterBad.fields.every(f => !f.overridden)) && assert.strictEqual(snapAfterBad.history.length, 0));
 
-    // ── 시연 A: 9876543210 (55 보류) ──
-    const a0 = await verify('9876543210');
-    check('A0 기본: 9876543210 = PENDING 55', () => assert.deepStrictEqual([a0.verdict, a0.total], ['PENDING', 55]));
+    // ── 시연 A: 1293284715 (55 보류) ──
+    const a0 = await verify('1293284715');
+    check('A0 기본: 1293284715 = PENDING 55', () => assert.deepStrictEqual([a0.verdict, a0.total], ['PENDING', 55]));
     await put({ PENDING_CUT: 40 });
-    const a1 = await verify('9876543210');
+    const a1 = await verify('1293284715');
     check('A1 보류 컷 50→40 (사용자 제안): 55 ≥ 40 이라 PENDING 유지 — 판정 안 바뀜(기록)', () => assert.deepStrictEqual([a1.verdict, a1.total], ['PENDING', 55]));
     await put({ PENDING_CUT: 60 });
-    const a2 = await verify('9876543210');
+    const a2 = await verify('1293284715');
     check('A2 보류 컷 50→60: PENDING → REJECTED (총점 55 불변)', () => assert.deepStrictEqual([a2.verdict, a2.total], ['REJECTED', 55]));
     await reset();
     await put({ APPROVED_CUT: 55 });
-    const a3 = await verify('9876543210');
+    const a3 = await verify('1293284715');
     check('A3 승인 컷 80→55: PENDING → APPROVED (총점 55 불변)', () => assert.deepStrictEqual([a3.verdict, a3.total], ['APPROVED', 55]));
     await reset();
-    const a4 = await verify('9876543210');
+    const a4 = await verify('1293284715');
     check('A4 기본값 복원 → PENDING 55', () => assert.deepStrictEqual([a4.verdict, a4.total], ['PENDING', 55]));
 
-    // ── 시연 B: 1234567890 (100 승인) ──
+    // ── 시연 B: 2208162346 (100 승인) ──
     await put({ CUSTOMER_MIN: 200 });
-    const b1 = await verify('1234567890');
+    const b1 = await verify('2208162346');
     check('B1 순고객 기준 50→200 (사용자 제안): 순고객 162명 → ③ 6→4점, 총점 98, APPROVED 유지 — 판정 안 바뀜(기록)', () =>
       assert.deepStrictEqual([b1.verdict, b1.total, b1.fds, b1.customerPt], ['APPROVED', 98, 38, 13]));
     await reset();
     await put({ MIN_BUSINESS_MONTHS: 96 });
-    const b2 = await verify('1234567890');
+    const b2 = await verify('2208162346');
     check('B2 업력 필수 개월 6→96: 업력 7.4년(88개월) → INELIGIBLE(NEW_BUSINESS)', () => {
       assert.strictEqual(b2.verdict, 'INELIGIBLE'); assert.ok(b2.reasons.includes('NEW_BUSINESS'));
     });
     await reset();
     await put({ APPROVED_CUT: 99, CUSTOMER_MIN: 200 });
-    const b3 = await verify('1234567890');
+    const b3 = await verify('2208162346');
     check('B3 승인 컷 99 + 순고객 기준 200: 98점 → PENDING', () => assert.deepStrictEqual([b3.verdict, b3.total], ['PENDING', 98]));
     await reset();
     await put({ CUSTOMER_RATIO_MIN: 0.95, TX_MIN: 200 });
-    const b4 = await verify('1234567890');
+    const b4 = await verify('2208162346');
     check('B4 비율 0.5→0.95 · 결제건수 30→200: 비율 0.90→4점, 180건→3점 → 총점 96 APPROVED', () => assert.deepStrictEqual([b4.verdict, b4.total], ['APPROVED', 96]));
     await reset();
 
     // ── 카드매출 필수 월수 ──
     await put({ MIN_SALES_MONTHS: 7 });
-    const c1 = await verify('1234567890');
+    const c1 = await verify('2208162346');
     check('카드매출 필수 월수 6→7: 시연 데이터 최대 6개월 → INELIGIBLE(INSUFFICIENT_SALES_MONTHS)', () => {
       assert.strictEqual(c1.verdict, 'INELIGIBLE'); assert.ok(c1.reasons.includes('INSUFFICIENT_SALES_MONTHS'));
     });
