@@ -249,19 +249,22 @@ function calcHometaxScore(hometaxResult) {
 //   noDataCase 는 4단계 detail 문구용으로만 남는다.
 //
 // [nextStep] 판정별 다음 절차. 프론트 NextStep 패널이 그대로 그린다.
-//   AUTO_RELEASE           승인 — 즉시 해제, 서류 없음
-//   REMOTE_REVIEW          보류 — 본부 담당자 원격 확인 + 잃은 점수 기준 맞춤 보완 + 1개월 후 자동 재검증
-//   BRANCH_INSPECTION      거절 — 서류로 바뀌지 않음, 영업점 현장 확인(실사)만 가능
-//   BRANCH_CURRENT_PROCESS 판단 불가 — 현행 절차(영업점 서류 심사) 안내 + 카드매출 6개월 후 자동 재검증
+//   [2026-09-12] 사람이 개입하는 경로를 현실에 맞춤 — 본부 원격 확인·실사·재검증 예약은 지금 은행 인프라에 없는 절차라 전부 삭제.
+//   이 서비스의 목적은 영업점이 없는 타지역 가맹점 결제계좌의 한도제한을 자동으로 푸는 것. 자동해제가 안 되면
+//   "무엇이 바뀌면 다시 신청해 자동 판정을 받을 수 있는가"만 말한다. 영업점 판단은 신설(카드매출 6개월 미만)에만 의미가 있다.
+//   AUTO_RELEASE         승인 — 즉시 해제, 서류 없음
+//   REAPPLY_AFTER_REMEDY 보류(자동해제 기준 미달) — 미달 항목별 보완 방법 + 보완 후 다시 신청(신청마다 최신 데이터로 재판정)
+//   RELEASE_UNAVAILABLE  거절 — 서류로 바뀌지 않음, 사유 해소 후 다시 신청
+//   REAPPLY_AFTER_MONTHS 보류(카드매출 6개월 미만) — 다시 신청할 수 있는 시점(연월) + 영업점이 가까우면 창구 판단 가능(현행 서류 5종)
 
 const VERDICT_UI = {
-  APPROVED:   { label: '한도 해제 승인',          color: '#00C3A5' },
-  PENDING:    { label: '보류 · 본부 원격 확인',   color: '#FFB800' },
-  REJECTED:   { label: '비대면 해제 불가',        color: '#FF4D4F' },
-  INELIGIBLE: { label: '판단 불가 · 영업점 안내', color: '#5B7A99' },
+  APPROVED:   { label: '한도 해제 승인',            color: '#00C3A5' },
+  PENDING:    { label: '보류 · 자동해제 기준 미달',  color: '#FFB800' },
+  REJECTED:   { label: '비대면 해제 불가',          color: '#FF4D4F' },
+  INELIGIBLE: { label: '보류 · 카드매출 6개월 미만', color: '#FFB800' },
 };
 
-// 현행 절차(영업점 서류 심사) 서류 — INELIGIBLE 에만 붙는다
+// 현행 절차(영업점 서류 심사) 서류 — INELIGIBLE 에만 붙는다 (영업점이 가까운 신설 사업자가 창구 판단을 받을 때)
 const CURRENT_PROCESS_DOCS = [
   '사업자등록증 원본',
   '대표자 신분증',
@@ -270,28 +273,30 @@ const CURRENT_PROCESS_DOCS = [
   '(전자)세금계산서 또는 매출 증빙 자료',
 ];
 
-const HUMAN_REVIEW = '본부 담당자 확인(추가 서류로 대체 불가)';
+const NO_DOC_SUBSTITUTE = '서류로 대체 불가 · 거래 패턴이 정상화되면 다음 신청 때 다시 판정';
+const LOCATION_REMEDY   = '네이버 지도에 매장 등록 또는 사업자등록 주소를 실제 매장으로 정정한 뒤 다시 신청';
 
-// 보류 시 잃은 점수 단계별 맞춤 보완 — 등록 서류(사업자등록증·부가세 증명)는 넣지 않는다
+// 보류 시 잃은 점수 단계별 보완 방법 — 사업자가 스스로 할 수 있는 것만 적는다(제출 경로·심사 부서 없음).
+// 등록 서류(사업자등록증·부가세 증명)는 넣지 않는다.
 function buildRemedies({ locationScore, licenseScore, salesScore, gate }) {
   const RULES = getRules();
   const remedies = [];
   const sub = key => (salesScore?.subScores || []).find(s => s.key === key);
 
   if (!locationScore?.passed) {
-    remedies.push({ cause: '사업장 위치 미확인', evidence: '임대차계약서 또는 간판·매장 사진' });
+    remedies.push({ cause: '사업장 위치 미확인', evidence: LOCATION_REMEDY });
   } else if (locationScore.score < 20) {
-    remedies.push({ cause: '사업장 위치 교차검증 미완료 (단일 소스만 확인)', evidence: '임대차계약서 또는 간판·매장 사진' });
+    remedies.push({ cause: '사업장 위치 교차검증 미완료 (단일 소스만 확인)', evidence: LOCATION_REMEDY });
   }
   if (!licenseScore?.passed) {
-    remedies.push({ cause: '영업 인허가 미확인', evidence: '영업신고증(허가증)' });
+    remedies.push({ cause: '영업 인허가 미확인', evidence: '관할 지자체에 영업신고(허가) 등록 후 다시 신청' });
   }
 
   const volume = sub('volume');
   if (volume && volume.score < RULES.REMEDY.VOLUME_WEAK_BELOW) {
     remedies.push({
       cause: `카드매출 규모·건수 약함 (${volume.score}/${volume.max}점 · ${volume.detail})`,
-      evidence: '세금계산서 발행내역 또는 POS 단말기 설치 확인서(KICC)',
+      evidence: '카드매출이 이어지면 다음 신청 때 최신 6개월로 다시 판정',
     });
   }
 
@@ -304,12 +309,36 @@ function buildRemedies({ locationScore, licenseScore, salesScore, gate }) {
   if (anomaly && (anomaly.flags || []).length >= 1) {
     causes.push(`이상패턴 ${anomaly.flags.length}건 (${anomaly.flags.join(' / ')})`);
   }
-  if (causes.length) remedies.push({ cause: causes.join(' · '), evidence: HUMAN_REVIEW });
+  if (causes.length) remedies.push({ cause: causes.join(' · '), evidence: NO_DOC_SUBSTITUTE });
 
   if (gate?.level === 'HOLD') {
-    remedies.push({ cause: `위험 신호 보류: ${gate.summary}`, evidence: HUMAN_REVIEW });
+    remedies.push({ cause: `위험 신호 보류: ${gate.summary}`, evidence: '서류로 대체 불가 · 해당 신호가 해소된 뒤 다시 신청' });
   }
   return remedies;
+}
+
+// 다시 신청할 수 있는 시점 — 업력 기준(등록일 + 필수 개월)과 매출 월수 기준(지금 + 부족 개월) 중 늦은 쪽.
+// 카드 미가맹은 첫 매출 시점을 알 수 없어 날짜를 내지 않는다(업력 미달이 같이 있으면 그 날짜를 "빠르면" 으로).
+function reapplyFrom(elig, ntsResult) {
+  const { MIN_BUSINESS_MONTHS, MIN_SALES_MONTHS } = getRules();
+  const codes = new Set((elig?.reasons || []).map(r => r.code));
+  const candidates = [];
+  if (codes.has('NEW_BUSINESS') && ntsResult?.registrationDate) {
+    const reg = new Date(ntsResult.registrationDate);
+    if (!isNaN(reg.getTime())) {
+      reg.setMonth(reg.getMonth() + Math.max(MIN_BUSINESS_MONTHS, MIN_SALES_MONTHS));
+      candidates.push(reg);
+    }
+  }
+  if (codes.has('INSUFFICIENT_SALES_MONTHS')) {
+    const d = new Date();
+    d.setMonth(d.getMonth() + Math.max(1, MIN_SALES_MONTHS - (elig.salesMonths || 0)));
+    candidates.push(d);
+  }
+  if (!candidates.length) return null;
+  const d = new Date(Math.max(...candidates.map(c => c.getTime())));
+  const y = d.getFullYear(); const m = d.getMonth() + 1;
+  return { ym: `${y}-${String(m).padStart(2, '0')}`, label: `${y}년 ${m}월` };
 }
 
 function nextStepApproved() {
@@ -326,65 +355,71 @@ function nextStepApproved() {
 
 function nextStepPending(ctx) {
   const RULES = getRules();
+  const gate = ctx?.gate;
+  const first = gate?.level === 'HOLD'
+    ? `위험 신호(${gate.summary})가 해소되기 전에는 비대면으로 해제할 수 없습니다.`
+    : `자동해제 기준(${RULES.APPROVED_CUT}점)에 미달한 항목이 있어 지금 데이터로는 비대면으로 해제할 수 없습니다.`;
   return {
-    type: 'REMOTE_REVIEW',
-    title: '본부 원격 확인',
+    type: 'REAPPLY_AFTER_REMEDY',
+    title: '보완 후 다시 신청',
     lines: [
-      '데이터만으로 확정할 수 없어 본부 담당자가 아래 항목을 원격으로 확인한 뒤 결과를 문자로 알려드립니다.',
-      '따로 제출할 서류는 없습니다. 확인에 필요하면 담당자가 아래 자료를 요청합니다. (사업자등록증·부가가치세 증명 등 등록 서류는 요구하지 않습니다)',
-      `${RULES.REVERIFY_AFTER_MONTHS}개월 후 자동 재검증을 예약할 수 있습니다. 카드매출이 개선되면 다음 검증에서 자동 반영됩니다.`,
+      first,
+      '따로 제출할 서류는 없습니다. 아래 항목이 보완된 뒤 다시 신청하면 그 시점의 최신 데이터로 다시 판정합니다.',
     ],
-    remedies: buildRemedies(ctx), docs: [], reverifyAvailable: true,
+    remedies: buildRemedies(ctx), docs: [],
   };
 }
 
 function nextStepRejected(kind, gate) {
-  const lock = '이 판정은 서류 제출로 바뀌지 않으며, 영업점 현장 확인(실사) 절차만 가능합니다.';
   if (kind === 'NTS_INACTIVE') {
     return {
-      type: 'BRANCH_INSPECTION', reasonCode: kind,
+      type: 'RELEASE_UNAVAILABLE', reasonCode: kind,
       title: '해제 대상 아님',
       lines: [
         '국세청 사업자등록 상태가 휴업 또는 폐업으로 확인되어 한도 해제 대상이 아닙니다.',
-        '실제와 다르다면 사업자등록 정정 후 다시 신청하시거나, 가까운 iM Bank 영업점에 문의해 주세요.',
+        '실제와 다르다면 홈택스에서 사업자등록 상태를 정정한 뒤 다시 신청해 주세요.',
       ],
-      remedies: [], docs: [], reverifyAvailable: false,
+      remedies: [], docs: [],
     };
   }
   if (kind === 'GATE_BLOCK') {
     return {
-      type: 'BRANCH_INSPECTION', reasonCode: kind,
-      title: '영업점 현장 확인(실사)',
+      type: 'RELEASE_UNAVAILABLE', reasonCode: kind,
+      title: '비대면 해제 불가',
       lines: [
         `부정 신호가 확인되어 비대면 해제가 불가합니다. (${gate?.summary || '위험 신호'})`,
-        lock,
+        '이 판정은 서류 제출로 바뀌지 않습니다. 해당 신호가 해소된 뒤 다시 신청하면 최신 데이터로 다시 판정합니다.',
       ],
-      remedies: [], docs: [], reverifyAvailable: false,
+      remedies: [], docs: [],
     };
   }
   return {
-    type: 'BRANCH_INSPECTION', reasonCode: 'SCORE_BELOW_CUT',
-    title: '영업점 현장 확인(실사)',
+    type: 'RELEASE_UNAVAILABLE', reasonCode: 'SCORE_BELOW_CUT',
+    title: '비대면 해제 불가',
     lines: [
-      '검증 기준 미달. 영업점 현장 확인(실사) 절차로 안내합니다.',
-      lock,
+      '자동 검증 기준에 크게 미달해 비대면으로 해제할 수 없습니다.',
+      '이 판정은 서류 제출로 바뀌지 않습니다. 매장 실재와 카드매출이 데이터로 확인되면 다시 신청해 주세요.',
     ],
-    remedies: [], docs: [], reverifyAvailable: false,
+    remedies: [], docs: [],
   };
 }
 
-function nextStepIneligible(eligibility) {
+function nextStepIneligible(eligibility, ntsResult) {
   const RULES = getRules();
   const reasonText = (eligibility?.reasons || []).map(r => r.label).join(' · ') || '카드매출 이력 없음';
+  const from = reapplyFrom(eligibility, ntsResult);
+  const when = from
+    ? `빠르면 ${from.label}부터 다시 신청할 수 있습니다. 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓이면 신청 즉시 자동 판정합니다.`
+    : `카드 가맹 후 카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓이면 다시 신청해 주세요. 신청 즉시 자동 판정합니다.`;
   return {
-    type: 'BRANCH_CURRENT_PROCESS',
-    title: '현행 절차(영업점 서류 심사) 안내',
+    type: 'REAPPLY_AFTER_MONTHS',
+    title: '카드매출 6개월 후 다시 신청',
     lines: [
-      `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 실영위를 판단할 수 없습니다. (사유: ${reasonText})`,
-      '현행 절차(영업점 서류 심사)로 안내합니다. 아래 서류를 지참하고 가까운 iM Bank 영업점을 방문해 주세요.',
-      `카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓이면 자동 재검증할 수 있습니다.`,
+      `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 아직 실영위를 판단할 수 없습니다. (사유: ${reasonText})`,
+      when,
+      '가까운 iM Bank 영업점이 있다면 이 결과(매장 실재 3단계)를 근거로 창구에서 바로 판단할 수 있습니다. 방문 시 아래 서류를 지참해 주세요.',
     ],
-    remedies: [], docs: CURRENT_PROCESS_DOCS.slice(), reverifyAvailable: true,
+    remedies: [], docs: CURRENT_PROCESS_DOCS.slice(), reapplyFrom: from?.ym || null,
   };
 }
 
@@ -423,18 +458,18 @@ function getVerdict(totalScore, {
   const elig = eligibility || checkEligibility({ nts: ntsResult, sales: salesResult });
   if (!elig.eligible) {
     return withUi('INELIGIBLE', {
-      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 실영위를 판단할 수 없습니다. 현행 절차(영업점 서류 심사)로 안내합니다.`,
+      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 아직 실영위를 판단할 수 없습니다. 카드매출이 ${RULES.MIN_SALES_MONTHS}개월 쌓이면 다시 신청해 주세요.`,
       reasons: elig.reasons,
       businessMonths: elig.businessMonths,
       salesMonths: elig.salesMonths,
-      nextStep: nextStepIneligible(elig),
+      nextStep: nextStepIneligible(elig, ntsResult),
     });
   }
 
-  // ④ 네거티브 게이트 HOLD — 점수 무관 보류 (사람이 봐야 하는 신호)
+  // ④ 네거티브 게이트 HOLD — 점수 무관 보류 (신호가 해소되기 전엔 자동해제 안 함)
   if (gate?.level === 'HOLD') {
     return withUi('PENDING', {
-      description: `${gate.summary}. 본부 담당자가 확인합니다.`,
+      description: `${gate.summary}. 해소 전에는 비대면으로 해제할 수 없습니다.`,
       gateLevel: gate.level,
       gateReasons: gate.reasons,
       nextStep: nextStepPending(remedyCtx),
@@ -454,7 +489,7 @@ function getVerdict(totalScore, {
   }
   if (totalScore >= RULES.PENDING_CUT) {
     return withUi('PENDING', {
-      description: `총점 ${totalScore}점. 데이터만으로 확정할 수 없어 본부 담당자가 원격으로 확인합니다.`,
+      description: `총점 ${totalScore}점. 자동해제 기준(${RULES.APPROVED_CUT}점)에 미달한 항목이 있어 지금 데이터로는 해제할 수 없습니다. 보완 후 다시 신청하면 자동 판정합니다.`,
       nextStep: nextStepPending(remedyCtx),
     });
   }

@@ -12,8 +12,9 @@
  *
  * [기대값 — 2026-09-08 판정 4종 정책]
  *   1234567890 APPROVED   100  총점 불변(기준선 100)
- *   9876543210 PENDING     55  6개월 매출 채움(mock 예외 수정) → 보류 시연
- *   2222222222 INELIGIBLE  60  업력 4개월 + 카드매출 없음 → 판단 불가(현행 절차)
+ *   9876543210 PENDING     55  6개월 매출 채움(mock 예외 수정) → 보류(자동해제 기준 미달) 시연
+ *   2222222222 INELIGIBLE  60  업력 4개월 + 카드매출 없음 → 보류(카드매출 6개월 미만, 다시 신청 시점 안내)
+ * [2026-09-12] nextStep 유형 개명: REMOTE_REVIEW→REAPPLY_AFTER_REMEDY · BRANCH_INSPECTION→RELEASE_UNAVAILABLE · BRANCH_CURRENT_PROCESS→REAPPLY_AFTER_MONTHS
  *   5555555555 REJECTED    75  게이트 BLOCK, 총점 불변(기준선 75)
  *   1111111111 REJECTED     0  폐업, 총점 불변(기준선 0)
  */
@@ -32,10 +33,10 @@ const UPDATE_BASELINE = process.argv.includes('--update-baseline');
 // 시연 5건 기대값. baselineTotal = 정책 변경 전 스냅샷과 같아야 하는 총점(null 이면 변경 허용)
 const CASES = [
   { num: '1234567890', label: '우량 사업자',              verdict: 'APPROVED',   total: 100, gate: 'NONE',  next: 'AUTO_RELEASE',           baselineTotal: 100 },
-  { num: '9876543210', label: '기존 사업자·규모 약함',     verdict: 'PENDING',    total: 55,  gate: 'WATCH', next: 'REMOTE_REVIEW',          baselineTotal: null },
-  { num: '2222222222', label: '신설(업력 4개월·카드매출 없음)', verdict: 'INELIGIBLE', total: 60, gate: 'NONE', next: 'BRANCH_CURRENT_PROCESS', baselineTotal: null },
-  { num: '5555555555', label: '가장매출 의심(게이트 BLOCK)', verdict: 'REJECTED',   total: 75,  gate: 'BLOCK', next: 'BRANCH_INSPECTION',      baselineTotal: 75 },
-  { num: '1111111111', label: '폐업 사업자',              verdict: 'REJECTED',   total: 0,   gate: 'NONE',  next: 'BRANCH_INSPECTION',      baselineTotal: 0 },
+  { num: '9876543210', label: '기존 사업자·규모 약함',     verdict: 'PENDING',    total: 55,  gate: 'WATCH', next: 'REAPPLY_AFTER_REMEDY',   baselineTotal: null },
+  { num: '2222222222', label: '신설(업력 4개월·카드매출 없음)', verdict: 'INELIGIBLE', total: 60, gate: 'NONE', next: 'REAPPLY_AFTER_MONTHS',   baselineTotal: null },
+  { num: '5555555555', label: '가장매출 의심(게이트 BLOCK)', verdict: 'REJECTED',   total: 75,  gate: 'BLOCK', next: 'RELEASE_UNAVAILABLE',    baselineTotal: 75 },
+  { num: '1111111111', label: '폐업 사업자',              verdict: 'REJECTED',   total: 0,   gate: 'NONE',  next: 'RELEASE_UNAVAILABLE',    baselineTotal: 0 },
 ];
 
 function pad(s, w) {
@@ -102,7 +103,8 @@ async function run() {
       if (!ts.verdict.nextStep) errs.push('nextStep 없음');
       if (verdict === 'PENDING' && (ts.verdict.nextStep.docs || []).length) errs.push('보류에 서류 목록이 붙음');
       if (verdict === 'REJECTED' && (ts.verdict.nextStep.docs || []).length) errs.push('거절에 서류 목록이 붙음');
-      if (verdict === 'INELIGIBLE' && !(ts.verdict.reasons || []).length) errs.push('판단 불가 사유 없음');
+      if (verdict === 'INELIGIBLE' && !ts.verdict.nextStep.reapplyFrom && (ts.verdict.reasons || []).some(r => r.code !== 'NO_CARD_DATA')) errs.push('다시 신청 시점(reapplyFrom) 없음');
+      if (verdict === 'INELIGIBLE' && !(ts.verdict.reasons || []).length) errs.push('카드매출 6개월 미만 보류에 사유 없음');
 
       if (errs.length) failures.push(`${c.num}: ${errs.join(' / ')}`);
       rows.push({

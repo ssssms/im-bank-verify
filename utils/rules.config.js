@@ -92,8 +92,6 @@ const DEFAULTS = {
     CUSTOMER_WEAK_BELOW: 10, // ③ 순고객 분산도 점수 미만이면 '분산 낮음'
   },
 
-  // ── 자동 재검증 예약 ──────────────────────────────────────
-  REVERIFY_AFTER_MONTHS: 1,
 };
 
 // ── 관리자가 조정할 수 있는 키 정의 (패널·검증·이력 공용) ─────
@@ -112,12 +110,12 @@ const ADJUSTABLE = [
   },
   {
     key: 'MIN_SALES_MONTHS', label: '카드매출 필수 월수', unit: '개월', min: 0, max: 12, step: 1, integer: true,
-    help: '최근 6개월 중 매출 발생 월수가 이 값 미만이면 판단 불가(영업점 안내). 시연 데이터는 최대 6개월이라 7 이상이면 전부 판단 불가.',
+    help: '최근 6개월 중 매출 발생 월수가 이 값 미만이면 보류(카드매출 6개월 미만 · 다시 신청 시점 안내). 시연 데이터는 최대 6개월이라 7 이상이면 전부 이 보류.',
     read: r => r.MIN_SALES_MONTHS, apply: (r, v) => { r.MIN_SALES_MONTHS = v; },
   },
   {
     key: 'MIN_BUSINESS_MONTHS', label: '업력 필수 개월', unit: '개월', min: 0, max: 120, step: 1, integer: true,
-    help: '사업자등록 후 개월수가 이 값 미만이면 판단 불가(영업점 안내). 올리면 승인·보류였던 사업자가 판단 불가로 바뀔 수 있습니다.',
+    help: '사업자등록 후 개월수가 이 값 미만이면 보류(카드매출 6개월 미만). 올리면 승인·보류였던 사업자가 이 보류로 바뀔 수 있습니다.',
     read: r => r.MIN_BUSINESS_MONTHS, apply: (r, v) => { r.MIN_BUSINESS_MONTHS = v; },
   },
   {
