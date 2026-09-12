@@ -174,7 +174,7 @@ router.post('/business', async (req, res) => {
       salesResult    = sales.value; elapsed[4] = sales.ms;
       // 인허가: location 주소로 프랜차이즈 지점 매칭
       const locAddr = locationResult?.address || locationResult?.jibunAddress || null;
-      const lic = await timed(() => getLicenseInfo(cleanBizNum, name, locAddr));
+      const lic = await timed(() => getLicenseInfo(cleanBizNum, name, locAddr, [locationResult?.matchedStoreName]));
       licenseResult = lic.value; elapsed[3] = lic.ms;
     }
 
@@ -278,7 +278,7 @@ router.get('/stream', async (req, res) => {
     // ── Step 3: 영업 인허가 ───────────────────────────────────
     send(3, { status: 'loading', message: '행정안전부 지방행정인허가 조회 중...' });
     const licenseAddress = locationResult?.address || locationResult?.jibunAddress || null;
-    const lic = await timed(() => getLicenseInfo(cleanBizNum, name, licenseAddress));
+    const lic = await timed(() => getLicenseInfo(cleanBizNum, name, licenseAddress, [locationResult?.matchedStoreName]));
     const licenseResult = lic.value; elapsed[3] = lic.ms;
     const licenseScore  = calcStepScore(3, licenseResult);
     send(3, {

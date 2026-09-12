@@ -65,9 +65,11 @@ const nameVariants = raw => {
   return [...out];
 };
 
-/** 상호 점수 0~40 */
+/** 상호 점수 0~40 (inputName 은 문자열 하나 또는 [주 상호, 보조 상호…] — 보조는 네이버가 찾은 간판 상호. 가장 높은 점수를 쓴다) */
 function scoreName(candidateName, inputName) {
-  const cs = nameVariants(candidateName), is = nameVariants(inputName);
+  const inputs = (Array.isArray(inputName) ? inputName : [inputName]).filter(Boolean);
+  const cs = nameVariants(candidateName);
+  const is = [...new Set(inputs.flatMap(nameVariants))];
   if (!cs.length || !is.length) return { score: 0, level: 'none' };
   for (const c of cs) for (const i of is) if (c === i) return { score: 40, level: 'exact' };
   let best = { score: 0, level: 'none' };
@@ -77,6 +79,18 @@ function scoreName(candidateName, inputName) {
       // 포함: 짧은 쪽 비율이 클수록 높게 (「나살던고향」⊂「나살던고향집」 0.83 → 30점, 「오군」⊂「오군수제돈까스」는 2글자라 제외)
       const s = Math.round(20 + 15 * (short.length / long.length));
       if (s > best.score) best = { score: s, level: 'contains' };
+      continue;
+    }
+    // 합성 부분 일치(2026-09-12): 짧은 쪽이 긴 쪽의 「앞부분 + 뒷부분」과 정확히 같고 긴 쪽 가운데에만 단어가 더 있는 경우
+    //   (원장 「그린사우나」 ↔ 간판 「그린헬스사우나」: 앞 「그린」 + 뒤 「사우나」). 앞·뒤 각 2글자 이상, 짧은 쪽 4글자 이상.
+    //   15~25점이라 주소(도로명·건물번호 일치 50)와 영업 중(10)이 받쳐 줄 때만 HIGH 가 된다 — 이름만으로는 확정 불가.
+    if (short.length >= 4 && short.length < long.length) {
+      let pre = 0; while (pre < short.length && short[pre] === long[pre]) pre++;
+      let suf = 0; while (suf < short.length - pre && short[short.length - 1 - suf] === long[long.length - 1 - suf]) suf++;
+      if (pre >= 2 && suf >= 2 && pre + suf >= short.length) {
+        const s = Math.round(15 + 10 * (short.length / long.length));
+        if (s > best.score) best = { score: s, level: 'composite' };
+      }
     }
   }
   return best;
@@ -162,14 +176,14 @@ function rankCandidates(candidates, ref) {
     const address = i.ROAD_NM_ADDR || i.LOTNO_ADDR || '';
     const status = i.DTL_SALS_STTS_NM || '';
     const active = isActiveStatus(status);
-    const nm = scoreName(name, ref.storeName);
+    const nm = scoreName(name, [ref.storeName, ...(ref.altNames || [])]);
     const am = scoreAddress(`${i.ROAD_NM_ADDR || ''} ${i.LOTNO_ADDR ? '(' + i.LOTNO_ADDR + ')' : ''}`.trim() || address, ref);
     // 주소 근거가 전혀 없으면(참조 주소·BC 지역 모두 없음) 주소 점수는 중립 25 로 두되 EXACT/HIGH 는 못 준다
     const addrScore = am.score === null ? 25 : am.score;
     const statusScore = active ? 10 : 0;
     const total = nm.score + addrScore + statusScore;
     const reasons = [
-      nm.level === 'exact' ? '상호 일치' : nm.level === 'contains' ? '상호 부분 일치' : null,
+      nm.level === 'exact' ? '상호 일치' : nm.level === 'contains' ? '상호 부분 일치' : nm.level === 'composite' ? '상호 부분 일치(가운데 단어 차이)' : null,
       ...am.reasons,
       active ? '영업 중' : `${status || '상태 미확인'}`,
     ].filter(Boolean);

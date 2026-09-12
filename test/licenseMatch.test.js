@@ -110,4 +110,25 @@ ok('동의어 + 같은 주소 → 「삼덕동베이커리까페」는 「삼덕
   assert.ok(r.confidence === 'EXACT' || r.confidence === 'HIGH', `${r.confidence} ${r.matchScore}`);
 });
 
+
+ok('합성 부분 일치: 원장 「그린사우나」 ↔ 간판(네이버) 「그린헬스사우나」 + 같은 주소·영업 중 → HIGH', () => {
+  const r = top([{ ...row('그린사우나', '대구광역시 동구 장등로 34, 2층,3층 (신천동)'), type: '목욕장업' }],
+    { storeName: '그린헬스', altNames: ['그린헬스사우나'], region: { sido: '대구광역시', sigungu: '동구', dong: '신천3동' }, address: '대구광역시 동구 장등로 34' });
+  assert.strictEqual(r.confidence, 'HIGH', `${r.matchScore} ${r.confidence}`);
+  assert.ok(r.nameScore >= 15 && r.nameScore < 40, r.nameScore);
+  assert.ok(r.reasons.includes('상호 부분 일치(가운데 단어 차이)'));
+});
+
+ok('합성 부분 일치는 주소 근거 없이는 HIGH 가 안 된다 (이름만으로 확정 불가)', () => {
+  const r = top([{ ...row('그린사우나', ''), type: '목욕장업' }], { storeName: '그린헬스', altNames: ['그린헬스사우나'] });
+  assert.notStrictEqual(r.confidence, 'HIGH'); assert.notStrictEqual(r.confidence, 'EXACT');
+});
+
+ok('앞만 같거나(그린마트) 짧은 이름(3글자)은 합성 일치로 보지 않는다', () => {
+  const a = top([row('그린마트', '대구광역시 동구 장등로 34')], { storeName: '그린헬스', altNames: ['그린헬스사우나'], address: '대구광역시 동구 장등로 34' });
+  assert.strictEqual(a.nameScore, 0, `${a.nameScore}`);
+  const b = top([row('김밥집', '대구광역시 동구 장등로 34')], { storeName: '김치김밥집', address: '대구광역시 동구 장등로 34' });
+  assert.notStrictEqual(b.reasons.includes('상호 부분 일치(가운데 단어 차이)'), true);
+});
+
 console.log(`✅ ${n}건 통과`);

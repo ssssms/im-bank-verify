@@ -184,7 +184,7 @@ function regionMatch(address, region) {
  *  - BC 등록 지역(시군구)이 있으면 그 지역 밖의 후보는 버린다 — 인허가 원장에 사업자번호가 없어 지역이 유일한 식별 근거.
  *  - 영업 중 일치가 있으면 그것, 없고 동명 폐업만 있으면 폐업으로, 아무것도 없으면 조회 결과 없음.
  */
-async function getLicenseLive(storeName, address, businessNumber) {
+async function getLicenseLive(storeName, address, businessNumber, altNames = []) {
   const serviceKey = process.env.LICENSE_API_KEY || process.env.NTS_API_KEY;
   if (!serviceKey) throw new Error('LICENSE_API_KEY 미설정');
 
@@ -237,7 +237,10 @@ async function getLicenseLive(storeName, address, businessNumber) {
   // ★ 주소 검색 폴백(2026-09-11): 원장 상호가 「나 살던 고향」처럼 띄어쓰기·표기가 달라 상호 LIKE 로는 못 찾는 경우,
   //   네이버 도로명주소의 「도로명 건물번호」(예: 강남대로37길 28)로 그 주소에 등록된 업체를 받아 정규화 상호로 대조한다.
   const parsedRef = parseAddress(address);
-  if (parsedRef?.road && parsedRef?.building) queryVariants.push({ road: `${parsedRef.road} ${parsedRef.building}` });
+  // [2026-09-12] 주소 검색은 상호 라운드와 분리 — 상호 라운드에서 후보가 나와도 「영업 중 + HIGH 이상」이 없으면 주소 라운드를 이어 돈다.
+  //   (그린헬스: 체력단련장 원장의 「그린헬스클럽(폐업, 다른 가게)」이 먼저 잡혀 주소 검색까지 못 가던 것. 원장 상호는 「그린사우나」)
+  const roadQuery = parsedRef?.road && parsedRef?.building ? { road: `${parsedRef.road} ${parsedRef.building}` } : null;
+  const matchRef = { storeName, altNames, region, address: address || null };
 
   const candidates = [];
   const failed = [];      // 응답 없음(타임아웃·네트워크) — 조회 결과 없음 detail 에 표기
@@ -251,7 +254,7 @@ async function getLicenseLive(storeName, address, businessNumber) {
     promises.forEach((p, i) => {
       p.then(value => {
         states[i] = { status: 'fulfilled', value };
-        const hit = rankCandidates(value, { storeName, region, address: address || null }).find(c => c.active && c.confidence === 'EXACT');
+        const hit = rankCandidates(value, matchRef).find(c => c.active && c.confidence === 'EXACT');
         if (hit) finish();
       }).catch(reason => { states[i] = { status: 'rejected', reason }; })
         .finally(() => { if (--left === 0) finish(); });
@@ -268,12 +271,21 @@ async function getLicenseLive(storeName, address, businessNumber) {
     });
     if (candidates.length) break;
   }
+  const hasConfirmed = () => rankCandidates(candidates, matchRef).some(c => c.active && (c.confidence === 'EXACT' || c.confidence === 'HIGH'));
+  if (roadQuery && !hasConfirmed()) {
+    const settled = await settleWithEarlyExit(DATA_GO_KR_LICENSE_APIS.map(ep => fetchOne(ep, roadQuery)));
+    settled.forEach((s, i) => {
+      if (s.status === 'fulfilled') candidates.push(...s.value);
+      else if (s.status === 'rejected' && s.reason?.response) unavailable.push(`${DATA_GO_KR_LICENSE_APIS[i].name}(${s.reason.response.status})`);
+      else if (s.status === 'rejected') failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
+    });
+  }
   if (failed.length) console.warn(`[인허가] 응답 없음: ${failed.join(', ')}`);
   if (unavailable.length) console.warn(`[인허가] 미승인·오류 API 제외: ${unavailable.join(', ')}`);
 
   // ── 사업체 특정(2026-09-11): utils/licenseMatch.js — 상호 40 · 주소 50 · 영업 상태 10, 등급 EXACT/HIGH/MEDIUM/LOW/NONE ──
   //   HIGH 이상만 「이 사업체의 인허가」로 인정(20점). MEDIUM 이하는 「동일 사업체 여부 추가 확인 필요」로 0점 + 후보 표.
-  const ranked = rankCandidates(candidates, { storeName, region, address: address || null, jibunAddress: null })
+  const ranked = rankCandidates(candidates, { ...matchRef, jibunAddress: null })
     .filter(c => c.nameScore > 0)
     .filter(c => !region || !c.misses.some(m => m.startsWith('시군구 불일치'))); // BC 등록 지역 밖은 다른 가게
   const toCandidate = c => ({ name: c.name, address: c.address, type: c.type, status: c.status, matchScore: c.matchScore, confidence: c.confidence, reasons: c.reasons, misses: c.misses });
@@ -343,7 +355,7 @@ async function getLicenseLive(storeName, address, businessNumber) {
 }
 
 // ── 외부 노출 ─────────────────────────────────────────────────
-async function getLicenseInfo(businessNumber, storeName, address) {
+async function getLicenseInfo(businessNumber, storeName, address, altNames = []) {
   const useMock = process.env.USE_MOCK !== 'false';
   const key = process.env.LICENSE_API_KEY || process.env.NTS_API_KEY || '';
 
@@ -353,7 +365,7 @@ async function getLicenseInfo(businessNumber, storeName, address) {
   }
 
   try {
-    const result = await getLicenseLive(storeName, address, businessNumber);
+    const result = await getLicenseLive(storeName, address, businessNumber, (altNames || []).filter(n => n && n !== storeName));
     return { ...result, dataSource: 'LIVE' };
   } catch (e) {
     console.warn('[행정인허가 Live 실패 → Mock 전환]', e.message);
