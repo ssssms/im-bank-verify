@@ -135,8 +135,13 @@ function scoreAddress(candidateAddr, ref) {
   // 시군구(시도까지)
   const refSido = n?.sidoShort || (region?.sido || '').replace(SIDO_SUFFIX, '') || j?.sidoShort || '';
   const refSigungu = n?.sigungu || region?.sigungu || j?.sigungu || '';
+  // [2026-09-14] 사유 문구는 '실제로 비교에 쓴 주소'를 말해야 한다.
+  //   전에는 region(BC 등록 주소) 객체가 있기만 하면 「BC 등록 시군구 일치」라고 적었는데,
+  //   위 우선순위대로 네이버 주소가 있으면 그쪽으로 비교한다. 상호가 흔해 네이버가 다른 지역 동명 업체를
+  //   잡은 경우, BC 등록 시군구와는 불일치인데도 「BC 등록 시군구 일치」로 나왔다. 점수엔 영향 없는 표기 오류.
+  const sigunguFrom = n?.sigungu ? '네이버' : region?.sigungu ? 'BC 등록' : '지번';
   const sigunguOk = !!refSigungu && c.sigungu === refSigungu && (!refSido || c.sidoShort === refSido);
-  if (sigunguOk) { score += 20; reasons.push(region ? 'BC 등록 시군구 일치' : '시군구 일치'); }
+  if (sigunguOk) { score += 20; reasons.push(sigunguFrom === 'BC 등록' ? 'BC 등록 시군구 일치' : '시군구 일치'); }
   else if (refSigungu) misses.push('시군구 불일치');
 
   // 도로명 + 건물번호 (네이버 주소가 있을 때)

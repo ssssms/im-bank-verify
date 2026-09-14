@@ -131,4 +131,19 @@ ok('앞만 같거나(그린마트) 짧은 이름(3글자)은 합성 일치로 �
   assert.notStrictEqual(b.reasons.includes('상호 부분 일치(가운데 단어 차이)'), true);
 });
 
+// [2026-09-14] 사유 문구는 실제로 비교에 쓴 주소를 말해야 한다 (점수엔 영향 없는 표기)
+ok('네이버 주소로 비교했으면 「시군구 일치」 — BC 등록 주소가 딴 지역이어도 「BC 등록 시군구 일치」라고 하지 않는다', () => {
+  // 상호가 흔해 네이버가 다른 지역 동명 업체를 잡은 상황: BC 등록은 경북 영주, 네이버·원장은 경기 시흥
+  const r = top([{ ...row('요기요도시어부', '경기도 시흥시 은계남로 12, 1층'), type: '일반음식점' }],
+    { storeName: '도시어부', region: { sido: '경상북도', sigungu: '영주시', dong: '가흥1동' }, address: '경기도 시흥시 은계남로 12' });
+  assert.ok(r.reasons.includes('시군구 일치'), r.reasons.join(','));
+  assert.ok(!r.reasons.includes('BC 등록 시군구 일치'), `BC 등록 주소(영주시)와는 불일치인데 그렇게 적었다: ${r.reasons.join(',')}`);
+});
+
+ok('네이버 주소가 없어 BC 등록 주소로 비교했으면 「BC 등록 시군구 일치」', () => {
+  const r = top([{ ...row('도시어부', '경상북도 영주시 광복로 10'), type: '일반음식점' }],
+    { storeName: '도시어부', region: { sido: '경상북도', sigungu: '영주시', dong: '가흥1동' } });
+  assert.ok(r.reasons.includes('BC 등록 시군구 일치'), r.reasons.join(','));
+});
+
 console.log(`✅ ${n}건 통과`);
