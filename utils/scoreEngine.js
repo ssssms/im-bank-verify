@@ -304,7 +304,18 @@ function buildRemedies({ locationScore, licenseScore, salesScore, gate }) {
   const customer = sub('customer');
   const anomaly  = sub('anomaly');
   const causes = [];
-  if (customer && customer.score < RULES.REMEDY.CUSTOMER_WEAK_BELOW) {
+  // 순고객 최소선 미달 (2026-09-14) — 자동해제를 막은 사유이므로 먼저, 그리고 따로 적는다.
+  //   아래 causes 묶음(분산 낮음·이상패턴)은 가장매출 의심이라 '서류로 대체 불가' 지만,
+  //   순고객이 적은 것 자체는 작은 매장일 수도 있어 영업점이 매출 증빙으로 확인할 수 있다 — 안내가 달라야 한다.
+  const avgCust = salesScore?.metrics?.avgUniqueCustomers;
+  const thinCustomers = RULES.MIN_UNIQUE_CUSTOMERS > 0 && typeof avgCust === 'number'
+    && avgCust > 0 && avgCust < RULES.MIN_UNIQUE_CUSTOMERS;
+  if (thinCustomers) {
+    remedies.push({
+      cause: `카드 결제 고객이 적음 (월평균 순고객 ${Math.round(avgCust)}명 · 자동해제 기준 ${RULES.MIN_UNIQUE_CUSTOMERS}명)`,
+      evidence: '매출 증빙 자료 (POS 거래내역 · 매출장부 등)',
+    });
+  } else if (customer && customer.score < RULES.REMEDY.CUSTOMER_WEAK_BELOW) {
     causes.push(`순고객 분산 낮음 (${customer.score}/${customer.max}점 · ${customer.detail})`);
   }
   if (anomaly && (anomaly.flags || []).length >= 1) {
@@ -477,7 +488,28 @@ function getVerdict(totalScore, {
     });
   }
 
-  // ⑤ 총점 구간
+  // ⑤ 순고객 최소선 미달 — 점수 무관 보류 (2026-09-14)
+  //   총점 80점을 넘어도 카드로 결제한 '서로 다른 사람'이 최소선에 못 미치면 자동해제하지 않는다.
+  //   1~3단계 60점은 '등록되어 있는가'만 보고(게다가 동명 타지역 업체로도 만점이 난다),
+  //   FDS ④ 이상패턴 5점은 감점형이라 데이터가 얇을수록 만점이다 — 그래서 소액·소수카드 반복만으로
+  //   총점 82~86점이 나올 수 있었다. 순고객수가 실체를 재는 가장 조작 비용이 높은 지표라 여기서 한 번 더 막는다.
+  //   여기에 걸리는 건 '가짜'라는 판정이 아니라 '자동으로는 못 정한다'는 뜻 — 영업점에서 서류로 본다.
+  //   ★ 승인을 막는 규칙이지, 보류·거절을 끌어올리는 규칙이 아니다 — 총점이 승인 컷 이상일 때만 본다.
+  //     (이 조건이 없으면 보류 컷을 올려도 거절로 안 내려가는 등 총점 구간이 통째로 덮인다)
+  const minCustomers = RULES.MIN_UNIQUE_CUSTOMERS;
+  const avgCustomers = salesScore?.metrics?.avgUniqueCustomers;
+  if (totalScore >= RULES.APPROVED_CUT
+      && minCustomers > 0 && typeof avgCustomers === 'number' && avgCustomers > 0 && avgCustomers < minCustomers) {
+    return withUi('PENDING', {
+      description: `카드로 결제한 순고객이 월평균 ${Math.round(avgCustomers)}명으로 자동해제 기준(${minCustomers}명)에 못 미칩니다.`,
+      thinCustomerBase: { avg: Math.round(avgCustomers), min: minCustomers },
+      gateLevel: gate?.level || 'NONE',
+      gateReasons: gate?.reasons || [],
+      nextStep: nextStepPending(remedyCtx),
+    });
+  }
+
+  // ⑥ 총점 구간
   if (totalScore >= RULES.APPROVED_CUT) {
     const reasons = [];
     const fdsScore = salesScore?.score || 0;

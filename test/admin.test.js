@@ -63,8 +63,8 @@ async function run() {
     const badTok = await get({ headers: { 'x-admin-token': 'wrong' } });
     check('토큰 틀림 → 401', () => assert.strictEqual(badTok.status, 401));
     const snap0 = await get();
-    check('GET: 7개 필드 · 기본값 = 현재값 · 이력 0', () => {
-      assert.strictEqual(snap0.fields.length, 7);
+    check('GET: 8개 필드 · 기본값 = 현재값 · 이력 0', () => {
+      assert.strictEqual(snap0.fields.length, 8); // 2026-09-14 MIN_UNIQUE_CUSTOMERS 추가
       assert.ok(snap0.fields.every(f => f.value === f.defaultValue && !f.overridden));
       assert.strictEqual(snap0.history.length, 0);
       assert.strictEqual(field(snap0, 'CUSTOMER_MIN').value, 50);
@@ -98,7 +98,13 @@ async function run() {
     await reset();
     await put({ APPROVED_CUT: 55 });
     const a3 = await verify('1293284715');
-    check('A3 승인 컷 80→55: PENDING → APPROVED (총점 55 불변)', () => assert.deepStrictEqual([a3.verdict, a3.total], ['APPROVED', 55]));
+    // [2026-09-14] 순고객 최소선(15명)이 생기면서 승인 컷만 내려서는 승인이 안 된다 — 이 사업자는 순고객 11명.
+    check('A3 승인 컷 80→55: 총점 55 ≥ 55 지만 순고객 11명 < 15 → PENDING 유지 (순고객 최소선이 승인을 막는다)',
+      () => assert.deepStrictEqual([a3.verdict, a3.total], ['PENDING', 55]));
+    await put({ APPROVED_CUT: 55, MIN_UNIQUE_CUSTOMERS: 0 });
+    const a3b = await verify('1293284715');
+    check('A3b 승인 컷 55 + 순고객 최소선 0(끔): PENDING → APPROVED (총점 55 불변 · 승인 컷 오버라이드는 그대로 작동)',
+      () => assert.deepStrictEqual([a3b.verdict, a3b.total], ['APPROVED', 55]));
     await reset();
     const a4 = await verify('1293284715');
     check('A4 기본값 복원 → PENDING 55', () => assert.deepStrictEqual([a4.verdict, a4.total], ['PENDING', 55]));
@@ -108,6 +114,12 @@ async function run() {
     const b1 = await verify('2208162346');
     check('B1 순고객 기준 50→200 (사용자 제안): 순고객 162명 → ③ 6→4점, 총점 98, APPROVED 유지 — 판정 안 바뀜(기록)', () =>
       assert.deepStrictEqual([b1.verdict, b1.total, b1.fds, b1.customerPt], ['APPROVED', 98, 38, 13]));
+    await reset();
+    // [2026-09-14] 순고객 최소선 — 총점 100점이어도 최소선을 순고객수 위로 올리면 자동해제가 막히고 보류로 간다
+    await put({ MIN_UNIQUE_CUSTOMERS: 200 });
+    const bc = await verify('2208162346');
+    check('B-신규 순고객 최소선 15→200: 순고객 162명 < 200 → APPROVED → PENDING (총점 100 불변)',
+      () => assert.deepStrictEqual([bc.verdict, bc.total], ['PENDING', 100]));
     await reset();
     await put({ MIN_BUSINESS_MONTHS: 96 });
     const b2 = await verify('2208162346');

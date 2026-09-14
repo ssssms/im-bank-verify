@@ -35,6 +35,13 @@ const DEFAULTS = {
   MIN_BUSINESS_MONTHS: 6, // 업력(개월). 미만이면 NEW_BUSINESS
   MIN_SALES_MONTHS:    6, // 최근 6개월 중 매출 발생 월수. 미만이면 INSUFFICIENT_SALES_MONTHS
 
+  // ── 자동해제 최소선 — 순고객 (2026-09-14) ─────────────────
+  // 총점 80점을 넘어도 카드로 결제한 '서로 다른 사람'이 이 수에 못 미치면 자동해제하지 않고 보류(영업점 서류 확인).
+  // 왜 순고객인가: 1~3단계 60점은 '등록되어 있는가'만 보고, FDS ④ 이상패턴 5점은 감점형이라 데이터가 얇을수록 만점이 난다.
+  //   그래서 소액·소수카드 반복만으로 총점 82~86점이 나올 수 있었다(2026-09-14 측정). 순고객수는 가장 조작 비용이 높은 지표다.
+  // 기준값 15: BC 실데이터 실영업 10곳의 최저가 21.5명, 실체가 얇은 쪽은 2.3~10.7명 — 그 사이.
+  MIN_UNIQUE_CUSTOMERS: 15,
+
   // ── FDS 정상 기준 (40점 중) — 승인 사유 표기용 ───────────
   FDS_NORMAL_THRESHOLD: 24, // 40점의 60%
 
@@ -112,6 +119,11 @@ const ADJUSTABLE = [
     key: 'MIN_SALES_MONTHS', label: '카드매출 필수 월수', unit: '개월', min: 0, max: 12, step: 1, integer: true,
     help: '최근 6개월 중 매출 발생 월수가 이 값 미만이면 보류(카드매출 6개월 미만 · 다시 신청 시점 안내). 시연 데이터는 최대 6개월이라 7 이상이면 전부 이 보류.',
     read: r => r.MIN_SALES_MONTHS, apply: (r, v) => { r.MIN_SALES_MONTHS = v; },
+  },
+  {
+    key: 'MIN_UNIQUE_CUSTOMERS', label: '자동해제 순고객 최소선', unit: '명', min: 0, max: 200, step: 1, integer: true,
+    help: '월평균 순고객(중복 제외)이 이 값 미만이면 총점과 무관하게 보류 — 영업점에서 서류로 확인. 0 이면 이 최소선을 끕니다. 올리면 소규모 매장이 보류로 넘어갑니다.',
+    read: r => r.MIN_UNIQUE_CUSTOMERS, apply: (r, v) => { r.MIN_UNIQUE_CUSTOMERS = v; },
   },
   {
     key: 'MIN_BUSINESS_MONTHS', label: '업력 필수 개월', unit: '개월', min: 0, max: 120, step: 1, integer: true,
