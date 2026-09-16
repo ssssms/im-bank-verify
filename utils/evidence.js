@@ -26,6 +26,7 @@ const SOURCE_LABEL = {
   LIVE:      '실제 연동',
   MOCK:      '가상 데이터',
   BC_SAMPLE: '실제 연동(BC실데이터)',
+  BC_BATCH:  '배치 시점 기준',   // [2026-09-16] BC 배치 기준월의 상태로 평가한 단계 (도시어부) — Live 실패 폴백이 아니다
 };
 function sourceLabel(dataSource) {
   return SOURCE_LABEL[dataSource] || SOURCE_LABEL.MOCK;

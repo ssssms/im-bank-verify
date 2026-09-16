@@ -15,6 +15,26 @@ const axios = require('axios');
 // ── 시연용 사업자번호 (항상 Mock 사용) ────────────────────────────
 const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '5555555555']);
 
+// ── BC 실데이터 배치 시점 기준 사업자 (2026-09-16, 사용자 결정) ──────────────
+// BC 카드매출은 월 배치로 들어온다. 알람 사례로 받은 도시어부의 배치는 2025-11 까지인데
+// 국세청만 '오늘' 값을 읽으면 시점이 어긋난다 — 2026-03-11 폐업이라 1단계에서 종료되고
+// 카드매출·압류 알람이 화면에 아예 나오지 않는다(시연 불가).
+// 그래서 이 번호에 한해 배치 기준월의 상태를 돌려준다. 값은 BC 배치의 개설일자·거래가능상태에서 온 것이다.
+// dataSource 는 'BC_BATCH'(화면 라벨 「배치 시점 기준」) — 'MOCK' 으로 두면 evidence 의 폴백 감지가
+// 「실시간 조회 실패 → 가상 데이터로 대체」 경고를 띄운다.
+// ⚠️ 이 번호 하나만의 예외다. DEMO_NUMBERS 와 별개이고, 다른 번호는 종전대로 Live 를 탄다.
+const BC_BATCH_ASOF = {
+  '3160802724': {
+    asOf: '2025-11',
+    businessStatus: 'ACTIVE',
+    businessStatusText: '계속사업자',
+    businessType: '부가가치세 일반과세자',
+    registrationDate: '2024-10-31', // BC 배치 개설일자(REG_DATE 20241031)
+    companyName: '도시어부',
+    ceoName: '',
+  },
+};
+
 // ── Mock 데이터 테이블 ─────────────────────────────────────────
 // 시연 시나리오별 사업자번호 → 결과 매핑
 // 오늘 기준 n개월 전 날짜(YYYY-MM-DD) — 신설 시나리오의 업력을 시연일과 무관하게 고정
@@ -145,6 +165,13 @@ async function checkBusinessStatusLive(businessNumber) {
 
 // USE_MOCK 환경 변수에 따라 실제/Mock 서비스 선택 + dataSource 태깅
 async function checkBusinessStatusSafe(businessNumber) {
+  // BC 배치 시점 기준 사업자 — 카드매출 배치와 같은 시점의 국세청 상태로 본다 (위 BC_BATCH_ASOF 주석)
+  const batch = BC_BATCH_ASOF[businessNumber];
+  if (batch) {
+    const { asOf, ...status } = batch;
+    return { ...status, dataSource: 'BC_BATCH', asOf };
+  }
+
   // 시연용 번호는 항상 Mock (실제 국세청에 없는 번호이므로)
   if (process.env.USE_MOCK !== 'false' || DEMO_NUMBERS.has(businessNumber)) {
     const result = await checkBusinessStatus(businessNumber);

@@ -39,15 +39,13 @@ const OUT_PATH = path.join(DATA_DIR, 'bc_sample.json');
 const ENC_PATH = path.join(DATA_DIR, 'bc_sample.enc'); // 암호화본 — 이것만 git 에 올린다 (키는 .env / Render 환경변수 BC_SAMPLE_KEY)
 const ENV_PATH = path.join(__dirname, '..', '.env');
 
-const src = process.argv[2] || path.join(DATA_DIR, 'bc_sample.xlsx');
-if (!fs.existsSync(src)) {
-  console.error(`엑셀 파일이 없습니다: ${src}`);
-  process.exit(1);
+// 엑셀을 여러 개 줄 수 있다 — 같은 사업자가 겹치면 뒤에 준 파일이 이긴다 (2026-09-16 도시어부 추가분 합치기)
+//   예) npm run bc:import -- "샘플10곳_260910.xlsx" "도시어부_260914.xlsx"
+const sources = process.argv.slice(2).filter(a => !a.startsWith('--'));
+if (!sources.length) sources.push(path.join(DATA_DIR, 'bc_sample.xlsx'));
+for (const s of sources) {
+  if (!fs.existsSync(s)) { console.error(`엑셀 파일이 없습니다: ${s}`); process.exit(1); }
 }
-
-const wb = XLSX.readFile(src, { cellDates: false });
-const sheetNames = wb.SheetNames;
-const rowsOf = name => XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null, raw: true });
 
 const str = v => (v === null || v === undefined) ? '' : String(v).trim();
 const num = v => {
@@ -63,22 +61,31 @@ const shiftYm = (ym, delta) => { // 'YYYY-MM' + delta 개월
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
+// ── 파일별로 읽어 하나로 합친다 ────────────────────────────────
+const layoutMap = new Map(); // code → { no, code, name } — 파일마다 항목 수가 다를 수 있어 합집합
+const merchants = {};
+const alarmHistory = {};
+const warnings = [];
+let recordCount = 0;
+
+function ingest(src) {
+const wb = XLSX.readFile(src, { cellDates: false });
+const sheetNames = wb.SheetNames;
+const rowsOf = name => XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null, raw: true });
+
 // ── 시트1 레이아웃 ─────────────────────────────────────────────
 const layoutSheet = sheetNames.find(n => n.includes('레이아웃')) || sheetNames[0];
-const layout = rowsOf(layoutSheet)
+rowsOf(layoutSheet)
   .slice(1)
   .filter(r => num(r[0]) !== null && str(r[1]))
-  .map(r => ({ no: num(r[0]), code: str(r[1]), name: str(r[2]) }));
-const nameOf = Object.fromEntries(layout.map(l => [l.code, l.name]));
+  .forEach(r => { const code = str(r[1]); if (!layoutMap.has(code)) layoutMap.set(code, { no: num(r[0]), code, name: str(r[2]) }); });
 
 // ── 시트2 스냅샷 (사업자 × 기준년월) ───────────────────────────
 const dataSheet = sheetNames.find(n => n.includes('샘플')) || sheetNames[1];
 const dataRows = rowsOf(dataSheet);
 const header = dataRows[0].map(str);
 const records = dataRows.slice(1).filter(r => str(r[0]).length === 10).map(r => Object.fromEntries(header.map((h, i) => [h, r[i]])));
-
-const merchants = {};
-const warnings = [];
+recordCount += records.length;
 
 for (const rec of records) {
   const bizno = str(rec.BIZNO);
@@ -130,23 +137,7 @@ for (const rec of records) {
   cm.activeDaysSource = 'SB030002';
 }
 
-// 정리: 내부 필드 제거 · 월 정렬 · 신뢰 가능한 달 표시
-for (const m of Object.values(merchants)) {
-  const sorted = {};
-  for (const ym of Object.keys(m.monthly).sort()) {
-    const v = m.monthly[ym];
-    delete v._dist;
-    // complete = 매출·건수·순고객·영업일수가 모두 있는 달 (채점에 쓸 수 있는 달)
-    v.complete = v.sales !== null && v.txCount !== null && v.uniqueCustomers !== null && v.activeDays !== null;
-    sorted[ym] = v;
-  }
-  m.monthly = sorted;
-  m.snapshotMonths = Object.keys(m.snapshots).sort();
-  m.completeMonths = Object.keys(sorted).filter(k => sorted[k].complete);
-}
-
 // ── 시트3 알람 이력 (전치 표) ──────────────────────────────────
-const alarmHistory = {};
 const alarmSheet = sheetNames.find(n => n.includes('알람'));
 if (alarmSheet) {
   const rows = rowsOf(alarmSheet);
@@ -168,12 +159,31 @@ if (alarmSheet) {
     }
   }
 }
+} // ingest
+
+for (const src of sources) ingest(src);
+const layout = [...layoutMap.values()].sort((a, b) => (a.no || 0) - (b.no || 0));
+
+// 정리: 내부 필드 제거 · 월 정렬 · 신뢰 가능한 달 표시
+for (const m of Object.values(merchants)) {
+  const sorted = {};
+  for (const ym of Object.keys(m.monthly).sort()) {
+    const v = m.monthly[ym];
+    delete v._dist;
+    // complete = 매출·건수·순고객·영업일수가 모두 있는 달 (채점에 쓸 수 있는 달)
+    v.complete = v.sales !== null && v.txCount !== null && v.uniqueCustomers !== null && v.activeDays !== null;
+    sorted[ym] = v;
+  }
+  m.monthly = sorted;
+  m.snapshotMonths = Object.keys(m.snapshots).sort();
+  m.completeMonths = Object.keys(sorted).filter(k => sorted[k].complete);
+}
 
 // ── 출력 ─────────────────────────────────────────────────────
 const snapshotMonths = [...new Set(Object.values(merchants).flatMap(m => m.snapshotMonths))].sort();
 const out = {
   meta: {
-    source: path.basename(src),
+    sources: sources.map(s => path.basename(s)),
     importedAt: new Date().toISOString(),
     asOf: snapshotMonths[snapshotMonths.length - 1] || null,
     snapshotMonths,
@@ -204,9 +214,9 @@ fs.writeFileSync(ENC_PATH, JSON.stringify({ v: 1, alg: 'aes-256-gcm', iv: iv.toS
 console.log(`암호화본: ${ENC_PATH} (${Math.round(fs.statSync(ENC_PATH).size / 1024)}KB)`);
 
 // 요약 출력 (식별값은 앞 3자리만)
-console.log(`원본: ${src}`);
+console.log(`원본: ${sources.join(' + ')}`);
 console.log(`출력: ${OUT_PATH}`);
-console.log(`레이아웃 ${layout.length}항목 · 스냅샷 ${records.length}행 · 가맹점 ${Object.keys(merchants).length}곳 · 기준 ${out.meta.asOf}`);
+console.log(`레이아웃 ${layout.length}항목 · 스냅샷 ${recordCount}행 · 가맹점 ${Object.keys(merchants).length}곳 · 기준 ${out.meta.asOf}`);
 for (const m of Object.values(merchants)) {
   const months = Object.keys(m.monthly);
   console.log(`  ${m.bizno.slice(0, 3)}******* 스냅샷 ${m.snapshotMonths[0]}~${m.snapshotMonths.at(-1)} (${m.snapshotMonths.length}) · 월별 ${months[0]}~${months.at(-1)} (${months.length}) · 채점 가능 ${m.completeMonths[0]}~${m.completeMonths.at(-1)} (${m.completeMonths.length})`);

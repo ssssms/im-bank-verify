@@ -43,4 +43,17 @@ ok('INFO 규칙은 category CREDIT 이고 detail 에 「판정에 반영하지 �
   assert.ok(infos.every(r => r.category === 'CREDIT' && r.detail.includes('판정에 반영하지 않습니다')));
 });
 
+ok('FDS 스코어 5%(fdsHighScore5) 는 WATCH — 판정은 그대로, 사유만 남는다 [2026-09-16]', () => {
+  const g = gate({ fdsHighScore5: true });
+  assert.strictEqual(g.level, 'WATCH');
+  assert.strictEqual(g.override, null, '5% 만으로는 판정을 바꾸지 않는다');
+  assert.ok(g.reasons.some(r => r.code === 'fdsHighScore5' && r.level === 'WATCH'), JSON.stringify(g.reasons));
+});
+
+ok('5% 와 10% 가 함께 오면 10%(HOLD)가 이긴다 — 보류', () => {
+  const g = gate({ fdsHighScore5: true, fdsHighScore10: true });
+  assert.strictEqual(g.level, 'HOLD');
+  assert.strictEqual(g.override, 'PENDING');
+});
+
 console.log(`\u2705 ${n}건 통과`);

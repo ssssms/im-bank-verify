@@ -30,9 +30,12 @@
  *
  * [알람 → negativeGate 키] (as-of 스냅샷 값 > 0 이면 true. 열이 없으면 키 자체를 만들지 않는다)
  *   ownerMismatch ← FB00005 · merchantIdError ← FB00004 · badMerchantRegistered ← FE00003
- *   externalReport ← FB00011 · severeTermsViolation ← FC00006 · fdsHighScore10 ← FA00002
+ *   externalReport ← FB00011 · severeTermsViolation ← FC00006
+ *   fdsHighScore5 ← FA00001 (WATCH) · fdsHighScore10 ← FA00002 (HOLD)   [2026-09-16 5% 추가]
  *   abnormalOperationHold ← FF00016 · chargebackHold ← FF00079 · fraudComplaint ← FD00011
  *   overdueHolder ← FB00001|FB00002 · seizureHold ← FF00008|FF00024 (알람 이력 시트에만 있는 열)
+ *   ※ FA00001·FF00021~24 등은 64항목 매출 스냅샷에 열이 없다 → 같은 사업자의 알람 이력이 있으면
+ *     overlayAlarmHistory() 가 기준월 값을 얹어 준다.
  *   highCancelRatio ← SC240003 ≥ rules.BC.CANCEL_RATIO_WATCH · highDeclineRatio ← SC380003 ≥ rules.BC.DECLINE_RATIO_WATCH
  *   accidentCode · corporateCardSkew : 대응 열 없음 → 미생성
  *
@@ -104,6 +107,27 @@ function pickWindow(merchant) {
   return { last, yms };
 }
 
+/**
+ * 알람 이력 시트(전치 표)의 그 달 값을 스냅샷에 덧씌운다. (2026-09-16)
+ * 매출 스냅샷은 64항목 고정이라 FA00001(FDS 5%)·FF00021~24(압류) 같은 열이 아예 없다.
+ * 같은 사업자의 알람 이력이 따로 들어와 있으면 기준월(없으면 그 이전 가장 가까운 달)의 값을 얹어
+ * 게이트가 볼 수 있게 한다. 스냅샷에 이미 있는 코드는 덮어쓰지 않는다(매출 배치가 우선).
+ */
+function overlayAlarmHistory(bizno, asOf, snap) {
+  const hist = store?.alarmHistory?.[bizno];
+  if (!hist || !hist.snapshots) return snap;
+  const months = Object.keys(hist.snapshots).sort();
+  if (!months.length) return snap;
+  const at = months.filter(m => !asOf || m <= asOf).pop() || months[months.length - 1];
+  const src = hist.snapshots[at] || {};
+  const out = { ...snap };
+  for (const [code, v] of Object.entries(src)) {
+    if (!(code in out) || out[code] === null) out[code] = v;
+  }
+  out._alarmHistoryAt = at;
+  return out;
+}
+
 function buildAlarms(snap, rules) {
   const alarms = {};
   const flag = (key, ...codes) => {
@@ -116,6 +140,7 @@ function buildAlarms(snap, rules) {
   flag('badMerchantRegistered', 'FE00003');
   flag('externalReport', 'FB00011');
   flag('severeTermsViolation', 'FC00006');
+  flag('fdsHighScore5', 'FA00001');
   flag('fdsHighScore10', 'FA00002');
   flag('abnormalOperationHold', 'FF00016');
   flag('chargebackHold', 'FF00079');
@@ -155,7 +180,8 @@ function getBcSales(businessNumber) {
 
   const win = pickWindow(merchant);
   const asOf = win ? shiftYm(win.last, 1) : (merchant.snapshotMonths || []).slice(-1)[0];
-  const snap = merchant.snapshots[asOf] || merchant.snapshots[(merchant.snapshotMonths || []).slice(-1)[0]] || {};
+  const baseSnap = merchant.snapshots[asOf] || merchant.snapshots[(merchant.snapshotMonths || []).slice(-1)[0]] || {};
+  const snap = overlayAlarmHistory(bizno, asOf, baseSnap);
 
   const monthly = (win ? win.yms : []).map(ym => {
     const v = merchant.monthly[ym] || {};
