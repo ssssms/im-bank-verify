@@ -115,12 +115,20 @@ async function getLicenseMock(businessNumber) {
 // ── data.go.kr 행정안전부 인허가 API (195종) ─────────────────
 // 검색 파라미터: cond[BPLC_NM::LIKE]=상호명, cond[DTL_SALS_STTS_NM::EQ]=영업
 // 페이징: perPage, page / 응답: returnType=json
+// [2026-09-17] 응답이 없거나 늘 타임아웃에 걸리는 업종은 짧은 타임아웃으로 강등한다.
+//   라운드 소요 = 가장 느린 엔드포인트라, 이 둘 때문에 3단계가 조회마다 20초(10초 × 상호·주소 2라운드)였다.
+//   정상 9종 실측 0.16~1.7초(일반음식점이 최대) → 2.5초면 정상 응답은 하나도 잃지 않는다.
+const SLOW_TIMEOUT = 2500;
+
 const DATA_GO_KR_LICENSE_APIS = [
   { url: '/1741000/general_restaurants/info', name: '일반음식점' },
   { url: '/1741000/rest_cafes/info', name: '휴게음식점' },
   { url: '/1741000/bakeries/info', name: '제과점' },
   // 이용업(barber_shops)·체력단련장(fitness_centers)·병의원(hospitals·clinics)은 data.go.kr 활용신청 후 여기에 추가 (2026-09-11 확인: 403)
-  { url: '/1741000/beauty_salons/info', name: '미용업' },
+  // ⚠️[2026-09-17 실측] 미용업은 응답이 아예 오지 않는다(조건 유무·검색어 무관, 30초에도 ECONNABORTED, 4회 연속).
+  //   지금도 결과에 기여하지 못하는데 매 조회마다 라운드 전체를 10초씩 붙잡고 있었다 → 별도 짧은 타임아웃.
+  //   제외가 아니라 타임아웃 강등이라, API 가 정상으로 돌아와 2.5초 안에 응답하면 자동으로 다시 쓰인다.
+  { url: '/1741000/beauty_salons/info', name: '미용업', timeout: SLOW_TIMEOUT },
   { url: '/1741000/laundries/info', name: '세탁업' },
   { url: '/1741000/lodgings/info', name: '숙박업' },
   // 2026-09-11 추가 — data.go.kr 활용신청(자동승인) 후 같은 인증키로 동작. 승인 전엔 403 → 조용히 제외
@@ -131,7 +139,9 @@ const DATA_GO_KR_LICENSE_APIS = [
   { url: '/1741000/barber_shops/info', name: '이용업' },
   { url: '/1741000/fitness_centers/info', name: '체력단련장업' },
   { url: '/1741000/clinics/info', name: '의원' },
-  { url: '/1741000/hospitals/info', name: '병원' },
+  // ⚠️[2026-09-17 실측] 병원은 살아 있으나 늘 10.1~10.2초 — 기본 타임아웃 10초에 걸려 어차피 매번 버려진다.
+  //   (의원 clinics 은 0.5~0.7초로 정상. 병원은 상급 의료기관이라 한도제한계좌 대상도 드물다)
+  { url: '/1741000/hospitals/info', name: '병원', timeout: SLOW_TIMEOUT },
   // 2026-09-12 추가 — 그린헬스(사우나) 용. 목욕장업 https://www.data.go.kr/data/15155091/openapi.do (endpoint 존재 확인: 403 SERVICE_KEY_IS_NOT_REGISTERED), 활용신청 전엔 조용히 제외
   { url: '/1741000/public_baths/info', name: '목욕장업' },
 ];
@@ -221,7 +231,7 @@ async function getLicenseLive(storeName, address, businessNumber, altNames = [])
     ? `&cond%5BROAD_NM_ADDR%3A%3ALIKE%5D=${encodeURIComponent(`${region.sido} ${region.sigungu}`)}`
     : '';
   // query = { name } 상호 LIKE (+ BC 시군구 조건) / { road } 도로명주소 LIKE 만 (상호 조건 없음 — 주소 검색 폴백)
-  const getPage = async (path, page, query = { name: storeName }) => {
+  const getPage = async (path, page, query = { name: storeName }, timeoutMs = LICENSE_TIMEOUT) => {
     const cond = query.road
       ? `&cond%5BROAD_NM_ADDR%3A%3ALIKE%5D=${encodeURIComponent(query.road)}`
       : `&cond%5BBPLC_NM%3A%3ALIKE%5D=${encodeURIComponent(query.name)}` + regionCond;
@@ -233,22 +243,23 @@ async function getLicenseLive(storeName, address, businessNumber, altNames = [])
     if (cached) return cached;
     let res;
     try {
-      res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
+      res = await axios.get(url, { timeout: timeoutMs });
     } catch (e) {
       // 정상 응답 코드(403 등)·타임아웃은 재시도 무의미. 연결 끊김 같은 일시 오류만 1회 재시도
       if (e.response || e.code === 'ECONNABORTED') throw e;
-      res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
+      res = await axios.get(url, { timeout: timeoutMs });
     }
     const body = res.data?.response?.body || {};
     const items = body.items?.item;
     // 실패는 캐시하지 않는다(위 throw). 성공 응답만 담는다 — 한도 소진 시 빈 결과가 굳는 것을 막는다
     return cacheSet(url, { list: items ? (Array.isArray(items) ? items : [items]) : [], total: Number(body.totalCount) || 0 });
   };
-  const fetchOne = async ({ url: path, name }, query) => {
-    const first = await getPage(path, 1, query);
+  const fetchOne = async ({ url: path, name, timeout }, query) => {
+    const to = timeout || LICENSE_TIMEOUT; // 업종별 타임아웃(SLOW_TIMEOUT) — 없으면 기본값
+    const first = await getPage(path, 1, query, to);
     const pages = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE));
     const rest = pages > 1
-      ? (await Promise.allSettled(Array.from({ length: pages - 1 }, (_, i) => getPage(path, i + 2, query)))).flatMap(r => (r.status === 'fulfilled' ? r.value.list : []))
+      ? (await Promise.allSettled(Array.from({ length: pages - 1 }, (_, i) => getPage(path, i + 2, query, to)))).flatMap(r => (r.status === 'fulfilled' ? r.value.list : []))
       : [];
     return [...first.list, ...rest].map(item => ({ item, type: name }));
   };
@@ -304,7 +315,9 @@ async function getLicenseLive(storeName, address, businessNumber, altNames = [])
       else if (s.status === 'rejected') failed.push(DATA_GO_KR_LICENSE_APIS[i].name);
     });
   }
-  if (failed.length) console.warn(`[인허가] 응답 없음: ${failed.join(', ')}`);
+  // 라운드마다 같은 업종이 다시 담겨 「미용업, 병원, 미용업, 병원」처럼 겹쳐 보였다 — 로그·화면 모두 한 번씩만 (2026-09-17)
+  const failedNames = [...new Set(failed)];
+  if (failedNames.length) console.warn(`[인허가] 응답 없음: ${failedNames.join(', ')}`);
   if (unavailable.length) console.warn(`[인허가] 미승인·오류 API 제외: ${unavailable.join(', ')}`);
 
   // ── 사업체 특정(2026-09-11): utils/licenseMatch.js — 상호 40 · 주소 50 · 영업 상태 10, 등급 EXACT/HIGH/MEDIUM/LOW/NONE ──
@@ -374,7 +387,7 @@ async function getLicenseLive(storeName, address, businessNumber, altNames = [])
     address: null,
     bcRegion: bcRegion ? { ...bcRegion, matched: false, dongMatched: false } : null,
     licenseMatch: { ...licenseMatch, confidence: 'NONE', candidates: [] },
-    detail: `공개된 인허가 데이터에서 일치하는 정보를 확인하지 못했습니다${failed.length ? ` (${failed.join('·')} API 응답 없음)` : ''}`,
+    detail: `공개된 인허가 데이터에서 일치하는 정보를 확인하지 못했습니다${failedNames.length ? ` (${failedNames.join('·')} API 응답 없음)` : ''}`,
   };
 }
 
