@@ -136,6 +136,27 @@ const DATA_GO_KR_LICENSE_APIS = [
   { url: '/1741000/public_baths/info', name: '목욕장업' },
 ];
 
+// ── 인허가 응답 캐시 (2026-09-16 신설) ────────────────────────
+// 전 직원 공개로 조회량이 늘었다. 인허가는 조회 1건에 업종 12종 × 검색어 라운드(최대 4)까지 돌아
+// data.go.kr 일일 트래픽 한도를 네 단계 중 가장 먼저 소진한다.
+// 같은 URL = 같은 응답이므로 그대로 돌려준다(원장은 월 단위로 갱신되어 12시간이면 결과가 안 바뀐다).
+// 판정 로직·응답 형태는 건드리지 않는다 — 콜 수만 줄인다.
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const CACHE_MAX = 3000;
+const pageCache = new Map();
+function cacheGet(key) {
+  const hit = pageCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CACHE_TTL_MS) { pageCache.delete(key); return null; }
+  // 호출부가 항목을 만질 수 있으므로 사본을 준다 (캐시가 오염되면 다음 조회가 달라진다)
+  return { list: hit.value.list.map(o => ({ ...o })), total: hit.value.total };
+}
+function cacheSet(key, value) {
+  if (pageCache.size >= CACHE_MAX) pageCache.delete(pageCache.keys().next().value); // 가장 오래된 것부터 버린다
+  pageCache.set(key, { at: Date.now(), value: { list: value.list.map(o => ({ ...o })), total: value.total } });
+  return value;
+}
+
 // 주소에서 매칭용 키워드 추출 (구/동/로 단위)
 function extractAddressKeys(addr) {
   if (!addr) return [];
@@ -208,6 +229,8 @@ async function getLicenseLive(storeName, address, businessNumber, altNames = [])
       + `?serviceKey=${encodeURIComponent(serviceKey)}`
       + `&perPage=${PAGE_SIZE}&page=${page}&returnType=json`
       + cond;
+    const cached = cacheGet(url);
+    if (cached) return cached;
     let res;
     try {
       res = await axios.get(url, { timeout: LICENSE_TIMEOUT });
@@ -218,7 +241,8 @@ async function getLicenseLive(storeName, address, businessNumber, altNames = [])
     }
     const body = res.data?.response?.body || {};
     const items = body.items?.item;
-    return { list: items ? (Array.isArray(items) ? items : [items]) : [], total: Number(body.totalCount) || 0 };
+    // 실패는 캐시하지 않는다(위 throw). 성공 응답만 담는다 — 한도 소진 시 빈 결과가 굳는 것을 막는다
+    return cacheSet(url, { list: items ? (Array.isArray(items) ? items : [items]) : [], total: Number(body.totalCount) || 0 });
   };
   const fetchOne = async ({ url: path, name }, query) => {
     const first = await getPage(path, 1, query);

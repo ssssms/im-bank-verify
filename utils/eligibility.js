@@ -46,7 +46,15 @@ function checkEligibility({ nts, sales } = {}) {
     });
   }
 
-  if (!sales || !sales.hasData || !sales.merchantRegistered) {
+  if (sales?.outOfScope) {
+    // [2026-09-16] BC 제휴 표본 밖 — '데이터가 없다' 가 아니라 '조회할 수 없다'.
+    // 자격 판단 결과(INELIGIBLE)는 NO_CARD_DATA 와 같지만 사유 문구가 달라야 한다.
+    reasons.push({
+      code: 'OUT_OF_BC_SCOPE',
+      label: '카드매출 조회 불가',
+      detail: 'BC카드 데이터 제휴 표본에 없는 사업자입니다. 카드매출을 조회할 수 없습니다.',
+    });
+  } else if (!sales || !sales.hasData || !sales.merchantRegistered) {
     reasons.push({
       code: 'NO_CARD_DATA',
       label: '카드매출 데이터 없음',

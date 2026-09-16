@@ -25,9 +25,12 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 
 // Rate Limiting: API 남용 및 브루트포스 공격 방어
+// [2026-09-16] 30 → 120. 행내망에서 접속하면 전 직원이 같은 공인 IP 로 잡혀,
+//   조회 1건당 요청 3개(/lookup · /stream · 화면 로드) × 30 한도면 한 사무실이 금방 429 를 맞는다.
+//   120 = 분당 약 40 조회. 더 늘리려면 Render 환경변수 RATE_LIMIT_MAX 로 조정한다(코드 수정·재배포 불필요).
 const limiter = rateLimit({
   windowMs: 60 * 1000, // 1분 윈도우
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 30,
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 120,
   message: {
     success: false,
     error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.',

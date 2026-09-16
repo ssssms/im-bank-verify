@@ -27,6 +27,7 @@ const SOURCE_LABEL = {
   MOCK:      '가상 데이터',
   BC_SAMPLE: '실제 연동(BC실데이터)',
   BC_BATCH:  '배치 시점 기준',   // [2026-09-16] BC 배치 기준월의 상태로 평가한 단계 (도시어부) — Live 실패 폴백이 아니다
+  NOT_LINKED: '미연동',          // [2026-09-16] BC 제휴 표본 밖 — 조회 자체가 안 되는 단계. '가상 데이터' 와 구분한다
 };
 function sourceLabel(dataSource) {
   return SOURCE_LABEL[dataSource] || SOURCE_LABEL.MOCK;
@@ -130,9 +131,11 @@ function evidenceSales(r) {
   if (!r) return [];
   const lines = [];
   if (!r.hasData) {
-    lines.push(r.merchantRegistered
-      ? 'BC: 카드 가맹점 등록 · 최근 6개월 매출 없음'
-      : 'BC: 카드 가맹점 미등록 · 매출 데이터 없음');
+    lines.push(r.outOfScope
+      ? 'BC: 데이터 제휴 표본 밖 · 카드매출 조회 불가'
+      : r.merchantRegistered
+        ? 'BC: 카드 가맹점 등록 · 최근 6개월 매출 없음'
+        : 'BC: 카드 가맹점 미등록 · 매출 데이터 없음');
     return lines;
   }
   const monthly = Array.isArray(r.monthly) ? r.monthly : [];

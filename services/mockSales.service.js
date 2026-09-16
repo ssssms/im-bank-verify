@@ -99,6 +99,15 @@ const DEMO_SERIES = {
 const NO_SALES = { hasData: false, merchantRegistered: false, dataType: 'NOT_REGISTERED', recentMonths: 0, avgMonthlySales: 0, etaxCount: 0, monthly: [], industryAvgSales: 0, repeatedAmountRatio: 0, salesPattern: null, customerDiversity: null, industryAvgRatio: null, anomalyFlag: false };
 const REGISTERED_NO_SALES = { ...NO_SALES, merchantRegistered: true, dataType: 'REGISTERED_NO_SALES' };
 
+// ── BC 제휴 표본 밖 (2026-09-16 신설) ─────────────────────────
+// 전 직원 공개 이후, 시연·BC 표본이 아닌 실제 사업자번호가 들어온다.
+// 종전에는 사업자번호 해시로 매출 시계열을 지어내(generateSeededSales) 평균 29/40점을 매겼다.
+// 1~3단계는 Live(진짜 상호·주소)라 「실존 업체 + 지어낸 매출」이 한 화면에 붙는 문제가 있었다.
+//   → 카드매출은 "없다(미가맹)"가 아니라 "확인할 수 없다(제휴 표본 밖)" 로 돌려준다.
+//   merchantRegistered 는 false 지만 noDataCase 'D' 가 A(카드 미가맹)와 문구를 가른다.
+//   롤백: 환경변수 ALLOW_SEEDED_SALES=true 면 종전 동작 그대로.
+const OUT_OF_SCOPE = { ...NO_SALES, dataType: 'OUT_OF_SCOPE', outOfScope: true };
+
 // ── 최근 6개월 라벨(YYYY-MM) 생성 ─────────────────────────────
 function recentYearMonths(count = 6) {
   const now = new Date();
@@ -207,7 +216,9 @@ function getMockSalesData(businessNumber) {
   // 시연번호 중 매출 없는 케이스 (신설 5142691320 / 폐업 2144028530)
   if (DEMO_NUMBERS.has(businessNumber)) return { ...NO_SALES };
 
-  return generateSeededSales(businessNumber);
+  // [2026-09-16] 시연번호도 BC 표본도 아니면 카드매출을 만들어 내지 않는다.
+  if (process.env.ALLOW_SEEDED_SALES === 'true') return generateSeededSales(businessNumber);
+  return { ...OUT_OF_SCOPE };
 }
 
 // ── data.go.kr 행정안전부 인허가 API로 영업 활동 확인 ─────────
@@ -292,7 +303,8 @@ async function getSalesData(businessNumber, storeName) {
 
   if (!useLive) {
     const result = getMockSalesData(businessNumber);
-    return { ...withSummaryFields(result), dataSource: 'MOCK' };
+    // 표본 밖은 '가상 데이터' 가 아니라 '미연동' — 배지 문구가 달라진다(evidence.SOURCE_LABEL)
+    return { ...withSummaryFields(result), dataSource: result.outOfScope ? 'NOT_LINKED' : 'MOCK' };
   }
 
   try {

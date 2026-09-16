@@ -128,6 +128,9 @@ function calcLicenseScore(licenseResult) {
 function resolveNoDataCase(salesResult, ntsResult) {
   const RULES = getRules();
   if (!salesResult || salesResult.hasData) return null;
+  // D. 제휴 표본 밖 (2026-09-16) — 카드매출이 없는 게 아니라 조회할 수 없는 것이다.
+  //    A(카드 미가맹)와 반드시 갈라야 한다. A 라고 적으면 실존 업체를 두고 사실이 아닌 말을 하게 된다.
+  if (salesResult.outOfScope) return 'D';
   if (salesResult.merchantRegistered) return 'B';
   const months = calcBusinessYears(ntsResult?.registrationDate) * 12;
   return months <= RULES.NO_DATA_NEW_BUSINESS_MONTHS ? 'C' : 'A';
@@ -137,6 +140,7 @@ const NO_DATA_DETAIL = {
   A: '카드 가맹점 미등록. 카드 결제를 받지 않는 업종으로 추정',
   B: '카드 가맹점 등록 확인 · 최근 6개월 카드매출 없음. 추가 확인 필요',
   C: '신규 개업. 카드매출 이력이 쌓이기 전 단계',
+  D: 'BC카드 데이터 제휴 표본에 없는 사업자입니다',
 };
 
 function calcSalesScore(salesResult, ntsResult) {
@@ -420,14 +424,21 @@ function nextStepIneligible(eligibility, ntsResult) {
   const RULES = getRules();
   const reasonText = (eligibility?.reasons || []).map(r => r.label).join(' · ') || '카드매출 이력 없음';
   const from = reapplyFrom(eligibility, ntsResult);
-  const when = from
-    ? `고객 안내: 빠르면 ${from.label}부터 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 채워져 자동해제 대상이 됩니다.`
-    : `고객 안내: 카드 가맹 후 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓이면 자동해제 대상이 됩니다.`;
+  // [2026-09-16] 제휴 표본 밖은 "쌓이면 된다" 가 아니다 — 이미 쌓였을 수도 있고, 우리가 못 볼 뿐이다.
+  const outOfScope = (eligibility?.reasons || []).some(r => r.code === 'OUT_OF_BC_SCOPE');
+  const when = outOfScope
+    ? `고객 안내: BC카드 데이터 제휴가 열리면 카드매출까지 보고 자동으로 판단합니다.`
+    : from
+      ? `고객 안내: 빠르면 ${from.label}부터 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 채워져 자동해제 대상이 됩니다.`
+      : `고객 안내: 카드 가맹 후 카드매출 ${RULES.MIN_SALES_MONTHS}개월이 쌓이면 자동해제 대상이 됩니다.`;
+  const headline = outOfScope
+    ? `카드매출을 조회할 수 없어 자동으로 판단할 수 없습니다. (사유: ${reasonText})`
+    : `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. (사유: ${reasonText})`;
   return {
     type: 'REAPPLY_AFTER_MONTHS',
     title: '서류 지참 영업점 방문 · 현행 절차',
     lines: [
-      `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다. (사유: ${reasonText})`,
+      headline,
       '아래 서류를 지참해 영업점을 방문하면 직원이 매장 실재 3단계 결과와 함께 보고 판단합니다.',
       when,
     ],
@@ -469,8 +480,13 @@ function getVerdict(totalScore, {
   // ③ 판단 자격 미충족 — 카드매출 6개월 이력이 없어 실영위를 판단할 수 없다
   const elig = eligibility || checkEligibility({ nts: ntsResult, sales: salesResult });
   if (!elig.eligible) {
+    // [2026-09-16] 제휴 표본 밖은 '이력이 없다' 가 아니라 '조회가 안 된다' — 실존 업체에 없는 사실을 적지 않는다
+    const outOfScope = elig.reasons.some(r => r.code === 'OUT_OF_BC_SCOPE');
     return withUi('INELIGIBLE', {
-      description: `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다.`,
+      ...(outOfScope ? { label: '보류 · 카드매출 조회 불가' } : {}), // 칩 문구도 갈린다(색·구조는 그대로)
+      description: outOfScope
+        ? '카드매출을 조회할 수 없어 자동으로 판단할 수 없습니다.'
+        : `카드매출 ${RULES.MIN_SALES_MONTHS}개월 이력이 없어 자동으로 판단할 수 없습니다.`,
       reasons: elig.reasons,
       businessMonths: elig.businessMonths,
       salesMonths: elig.salesMonths,
