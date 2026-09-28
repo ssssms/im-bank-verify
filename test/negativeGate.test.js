@@ -7,7 +7,9 @@ const { evaluateGate, ALARM_RULES } = require('../utils/negativeGate');
 
 let n = 0;
 const ok = (msg, fn) => { fn(); n++; console.log(`  ✓ ${msg}`); };
-const gate = alarms => evaluateGate({ sales: { alarms }, salesScore: { subScores: [] } });
+// 아래 규칙 테스트는 알람을 받는다고 가정(useAlarms:true) — 규칙 코드는 알람 수령 시 다시 켜지도록 보존돼 있다
+const gate = alarms => evaluateGate({ sales: { alarms }, salesScore: { subScores: [] }, useAlarms: true });
+const gateDefault = alarms => evaluateGate({ sales: { alarms }, salesScore: { subScores: [] } }); // 현재 설정(USE_ALARMS=false)
 
 console.log('negativeGate');
 
@@ -52,6 +54,25 @@ ok('FDS 스코어 5%(fdsHighScore5) 는 WATCH — 판정은 그대로, 사유만
 
 ok('5% 와 10% 가 함께 오면 10%(HOLD)가 이긴다 — 보류', () => {
   const g = gate({ fdsHighScore5: true, fdsHighScore10: true });
+  assert.strictEqual(g.level, 'HOLD');
+  assert.strictEqual(g.override, 'PENDING');
+});
+
+ok('[2026-09-28] 알람 미수령(기본값) — 불량가맹점·대외기관 적발·명의대여·FDS 10% 가 와도 게이트 NONE', () => {
+  const g = gateDefault({ badMerchantRegistered: true, externalReport: true, ownerMismatch: true, fdsHighScore10: true, fdsHighScore5: true });
+  assert.strictEqual(g.level, 'NONE', JSON.stringify(g.reasons));
+  assert.strictEqual(g.override, null);
+  assert.strictEqual(g.reasons.length, 0);
+});
+
+ok('[2026-09-28] 알람 미수령이어도 월 매출 항목의 취소·거절 비율(WATCH)은 그대로', () => {
+  const g = gateDefault({ highCancelRatio: true, highDeclineRatio: true, badMerchantRegistered: true });
+  assert.strictEqual(g.level, 'WATCH');
+  assert.deepStrictEqual(g.reasons.map(r => r.code).sort(), ['highCancelRatio', 'highDeclineRatio']);
+});
+
+ok('[2026-09-28] 가장매출 의심 패턴 2건 이상(riskAlert)은 알람과 무관하게 보류', () => {
+  const g = evaluateGate({ sales: { alarms: { badMerchantRegistered: true } }, salesScore: { riskAlert: true, subScores: [{ key: 'anomaly', flags: ['급증', '특정일 집중'] }] } });
   assert.strictEqual(g.level, 'HOLD');
   assert.strictEqual(g.override, 'PENDING');
 });

@@ -17,7 +17,7 @@
  * 여기서 똑같이 판정해, 그 조건인데 MOCK 이 돌아왔으면 폴백으로 본다.
  */
 const { calcBusinessYears } = require('./businessAge');
-const { ALARM_RULES } = require('./negativeGate');
+const { ALARM_RULES, activeRules } = require('./negativeGate');
 const alarmLabel = key => ALARM_RULES.find(r => r.key === key)?.label || key;
 
 const DEMO_NUMBERS = new Set(['2208162346', '1293284715', '2144028530', '5142691320', '5555555555']);
@@ -142,13 +142,16 @@ function evidenceSales(r) {
   const active = monthly.filter(m => (m.sales || 0) > 0 || (m.txCount || 0) > 0); // fdsEngine·eligibility 와 같은 기준
   const avg = (arr, k) => (arr.length ? arr.reduce((a, m) => a + (m[k] || 0), 0) / arr.length : 0);
   const total = monthly.length || 6;
-  lines.push(`BC: 최근 ${total}개월 매출 발생 ${active.length}/${total}개월 · 월평균 ${Math.round(avg(active, 'txCount'))}건 · 순고객 ${Math.round(avg(active, 'uniqueCustomers'))}명`);
+  const custMonths = active.filter(m => m.uniqueCustomers != null); // 순고객 값이 없는 달(배치 누적 전)은 평균에서 뺀다 — fdsEngine 과 같은 기준
+  lines.push(`BC: 최근 ${total}개월 매출 발생 ${active.length}/${total}개월 · 월평균 ${Math.round(avg(active, 'txCount'))}건 · 순고객 ${Math.round(avg(custMonths, 'uniqueCustomers'))}명`);
   const avgSales = avg(active, 'sales');
   if (avgSales > 0) {
     const ratio = r.industryAvgSales > 0 ? ` · 업종 평균 대비 ${Math.round(avgSales / r.industryAvgSales * 100)}%` : '';
     lines.push(`BC: 월평균 매출 ${(avgSales / 10000).toFixed(0)}만원${ratio}${r.dataType === 'CARD_AND_ETAX' ? ' · 전자세금계산서 병행' : ''}`);
   }
-  const alarmKeys = Object.keys(r.alarms || {}).filter(k => r.alarms[k]);
+  // 게이트가 실제로 보는 규칙만 적는다 — 알람 미수령(USE_ALARMS=false)이면 시연 Mock 의 알람 자리도 화면에 안 나온다 [2026-09-28]
+  const liveKeys = new Set(activeRules().map(x => x.key));
+  const alarmKeys = Object.keys(r.alarms || {}).filter(k => r.alarms[k] && liveKeys.has(k));
   if (alarmKeys.length) lines.push(`BC 알람: ${alarmKeys.length}건 (${alarmKeys.map(alarmLabel).join(', ')})`);
   // BC 실데이터 샘플이면 배치 기준·가맹 기간·6개월 순고객·취소 비율 한 줄 (알람 줄이 있으면 3줄 제한에 밀린다)
   if (r.dataSource === 'BC_SAMPLE' && r.bc && !r.bc.alarmOnly) {

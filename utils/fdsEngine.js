@@ -49,13 +49,20 @@ function deriveMetrics(sales) {
   const sum = (arr, key) => arr.reduce((a, m) => a + (m[key] || 0), 0);
   const avg = (arr, key) => (arr.length ? sum(arr, key) / arr.length : 0);
 
-  const totalTx = sum(active, 'txCount');
-  const totalCustomers = sum(active, 'uniqueCustomers');
+  // [2026-09-28] 값이 「없는」 달과 「0」인 달을 가른다. BC 월 배치를 쌓아 만드는 값(순고객·영업일수)은
+  //   소급분이 비어 올 수 있는데, 그 달을 0명으로 평균하면 순고객이 낮게 잡혀 정상 가게가 15명 최소선에 걸린다.
+  //   null/undefined 인 달은 그 지표의 평균·비율·추세에서만 뺀다(매출 발생 월수·건수는 그대로).
+  const has = key => m => m[key] !== null && m[key] !== undefined;
+  const custActive = active.filter(has('uniqueCustomers'));
+  const daysActive = active.filter(has('activeDays'));
 
-  // 순고객수 추세: 최근 3개월 평균 ÷ 이전 3개월 평균 (매출 없는 달도 0으로 포함)
+  const totalTx = sum(custActive, 'txCount');
+  const totalCustomers = sum(custActive, 'uniqueCustomers');
+
+  // 순고객수 추세: 최근 3개월 평균 ÷ 이전 3개월 평균 (매출 없는 달도 0으로 포함, 값이 없는 달은 제외)
   const half = Math.floor(monthly.length / 2) || 0;
-  const older = monthly.slice(0, half);
-  const recent = monthly.slice(monthly.length - half);
+  const older = monthly.slice(0, half).filter(has('uniqueCustomers'));
+  const recent = monthly.slice(monthly.length - half).filter(has('uniqueCustomers'));
   const olderCust = avg(older, 'uniqueCustomers');
   const recentCust = avg(recent, 'uniqueCustomers');
   const customerTrend = olderCust > 0 ? recentCust / olderCust : (recentCust > 0 ? 1 : 0);
@@ -77,17 +84,18 @@ function deriveMetrics(sales) {
   return {
     monthlyCount: monthly.length,
     activeMonths: active.length,
-    avgActiveDays: avg(active, 'activeDays'),
+    avgActiveDays: avg(daysActive, 'activeDays'),
     avgTxCount: avg(active, 'txCount'),
     avgMonthlySales,
     industryAvgSales,
     industryRatio: industryAvgSales > 0 ? avgMonthlySales / industryAvgSales : 0,
-    avgUniqueCustomers: avg(active, 'uniqueCustomers'),
+    avgUniqueCustomers: avg(custActive, 'uniqueCustomers'),
+    customerMonths: custActive.length, // 순고객 값이 있는 영업 달 수 (배치 누적 전엔 영업 달보다 적다)
     customerRatio: totalTx > 0 ? totalCustomers / totalTx : 0,
     customerTrend,
     spikeRatio,
     spikeBaseMonths: spikeBase.length,
-    minActiveDays: active.length ? Math.min(...active.map(m => m.activeDays || 0)) : 0,
+    minActiveDays: daysActive.length ? Math.min(...daysActive.map(m => m.activeDays || 0)) : 0,
     repeatedAmountRatio: sales.repeatedAmountRatio || 0,
   };
 }

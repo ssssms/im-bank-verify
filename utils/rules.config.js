@@ -51,9 +51,14 @@ const DEFAULTS = {
   // ── BC카드 실데이터 샘플 → 게이트 WATCH 알람 파생 임계값 (services/bcData.service.js, 2026-09-10) ──
   //   최근6개월 취소매출비율(SC240003) · 카드거래건수 대비 거절건수비율(SC380003) 이 이 값 이상이면
   //   negativeGate 의 highCancelRatio / highDeclineRatio (WATCH — 판정 불변, 사유만 표시)
+  //   [2026-09-28] USE_ALARMS — BC 알람서비스(FDS 알람 55항목)는 비용 문제로 수령하지 않기로 확정(BC 요청서 v7).
+  //     이 서비스는 「실제로 영업하는가」만 본다. false 면 negativeGate 가 알람 기반 규칙(명의대여·불량가맹점·
+  //     대외기관 적발·FDS 스코어 등)을 건너뛰고, 월 매출 항목에서 나오는 취소·거절 비율(WATCH)만 남는다.
+  //     규칙 코드는 그대로 두었으므로 알람을 받게 되면 true 한 줄로 다시 켠다.
   BC: {
     CANCEL_RATIO_WATCH:  0.10,
     DECLINE_RATIO_WATCH: 0.10,
+    USE_ALARMS: false,
   },
 
   // ── FDS 40점 채점 임계값 (utils/fdsEngine.js) ─────────────

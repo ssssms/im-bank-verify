@@ -32,7 +32,11 @@
  * 각 필드에 대응하는 BC 항목코드명을 주석으로 적어 둔다.
  */
 
+const { getRules } = require('./rules.config');
+
 // ── BC 알람 기반 규칙 (배치 수신 시 자동 활성화) ─────────────
+// [2026-09-28] fromSales:true = 알람서비스가 아니라 월 매출 항목(요청서 v7 39·40번)에서 나오는 규칙.
+//   rules.BC.USE_ALARMS=false(알람 미수령 확정) 면 fromSales 규칙만 평가한다.
 // [{ key, level, label, detail, category? }] — sales.alarms[key] 가 truthy 면 발동. category 'CREDIT' = 신용·경영 참고(INFO)
 const CREDIT_NOTE = ' (신용·경영 참고 — 이 서비스는 실영위만 판단하므로 판정에 반영하지 않습니다)';
 const ALARM_RULES = [
@@ -124,13 +128,13 @@ const ALARM_RULES = [
     //   FA00002 가 켜지면 FA00001 도 대개 함께 켜지는데, 그때는 HOLD 가 우선하므로 판정은 보류 그대로다.
   },
   {
-    key: 'highCancelRatio', level: 'WATCH',
+    key: 'highCancelRatio', level: 'WATCH', fromSales: true,
     label: '취소매출 비중 이상',
     detail: '최근 6개월 취소매출 비중이 정상 범위를 벗어납니다.',
     // BC: 최근6개월 취소매출비율 / 최근6개월취소매입금액
   },
   {
-    key: 'highDeclineRatio', level: 'WATCH',
+    key: 'highDeclineRatio', level: 'WATCH', fromSales: true,
     label: '카드 거절 비율 이상',
     detail: '카드 거래건수 대비 거절건수 비율이 높습니다.',
     // BC: 최근6개월카드거래건수대비거절건수비율
@@ -142,6 +146,11 @@ const ALARM_RULES = [
     // BC: 최근6개월법인카드총매출액비중
   },
 ];
+
+// 지금 평가 대상인 규칙 — 알람 미수령(USE_ALARMS=false)이면 월 매출 항목 규칙만. useAlarms 인자는 테스트용
+function activeRules(useAlarms = getRules().BC?.USE_ALARMS) {
+  return useAlarms ? ALARM_RULES : ALARM_RULES.filter(r => r.fromSales);
+}
 
 const LEVEL_RANK = { NONE: 0, INFO: 0, WATCH: 1, HOLD: 2, BLOCK: 3 };
 
@@ -155,12 +164,12 @@ const LEVEL_RANK = { NONE: 0, INFO: 0, WATCH: 1, HOLD: 2, BLOCK: 3 };
  * @returns {{ level, override, reasons, summary }}
  *          override = 'REJECTED' | 'PENDING' | null  (판정 오버라이드)
  */
-function evaluateGate({ sales, salesScore, noDataCase } = {}) {
+function evaluateGate({ sales, salesScore, noDataCase, useAlarms } = {}) {
   const reasons = [];
 
-  // ① BC 알람 기반 규칙 — sales.alarms 미수신 시 전부 건너뜀
+  // ① BC 알람 기반 규칙 — sales.alarms 미수신 시 전부 건너뜀, 알람 미수령 확정(USE_ALARMS=false)이면 취소·거절 비율만
   const alarms = sales?.alarms || {};
-  for (const rule of ALARM_RULES) {
+  for (const rule of activeRules(useAlarms)) {
     if (alarms[rule.key]) {
       reasons.push({ code: rule.key, level: rule.level, label: rule.label, detail: rule.detail, source: 'BC_ALARM', ...(rule.category ? { category: rule.category } : {}) });
     }
@@ -213,4 +222,4 @@ function evaluateGate({ sales, salesScore, noDataCase } = {}) {
   return { level, override, reasons, summary, infoCount };
 }
 
-module.exports = { evaluateGate, ALARM_RULES };
+module.exports = { evaluateGate, ALARM_RULES, activeRules };

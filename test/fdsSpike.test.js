@@ -56,4 +56,33 @@ t('영업 중 급증(90/80/100/120/150/3,800만, 5555555555 형) → 종전과 �
   assert.ok(spikeFlag(r) && spikeFlag(r).includes('직전 3개월 평균의 30.8배'), spikeFlag(r));
 });
 
+// [2026-09-28] BC 월 배치 누적 — 순고객·영업일수가 비어 온 달(null)은 0 이 아니라 「없음」
+//   매월 80명 매장인데 앞 5개월 순고객이 비어 오면, 0 으로 평균하면 13명 → 15명 최소선에 걸려 오보류된다.
+function withGaps() {
+  const r = series([2400000, 2400000, 2400000, 2400000, 2400000, 2400000]); // 월 96건
+  r.monthly.forEach((m, i) => { m.uniqueCustomers = i < 5 ? null : 80; m.activeDays = i < 5 ? null : 20; });
+  return r;
+}
+
+t('순고객이 최근 1개월만 있고 앞 5개월이 null → 월평균 순고객 80명(0 으로 평균하지 않음)', () => {
+  const r = scoreFds(withGaps());
+  assert.strictEqual(r.metrics.avgUniqueCustomers, 80);
+  assert.strictEqual(r.metrics.customerMonths, 1);
+  assert.strictEqual(r.metrics.activeMonths, 6, '매출 발생 월수는 그대로 6');
+});
+
+t('영업일수 null 달은 평균·최소 영업일에서 빠진다 → 특정일 집중 오탐 없음', () => {
+  const r = scoreFds(withGaps());
+  assert.strictEqual(r.metrics.avgActiveDays, 20);
+  assert.strictEqual(r.metrics.minActiveDays, 20);
+  const flags = r.subScores.find(s => s.key === 'anomaly').flags;
+  assert.ok(!flags.some(f => f.includes('특정일')), flags.join(','));
+});
+
+t('0 은 여전히 0 — 값이 0 인 달은 평균에 들어간다', () => {
+  const r = withGaps();
+  r.monthly.forEach((m, i) => { if (i < 5) m.uniqueCustomers = 0; });
+  assert.strictEqual(Math.round(scoreFds(r).metrics.avgUniqueCustomers), 13);
+});
+
 console.log(process.exitCode ? `❌ ${passed}건 통과, 실패 있음` : `✅ ${passed}건 통과`);

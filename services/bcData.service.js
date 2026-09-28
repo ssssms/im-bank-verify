@@ -185,7 +185,9 @@ function getBcSales(businessNumber) {
 
   const monthly = (win ? win.yms : []).map(ym => {
     const v = merchant.monthly[ym] || {};
-    return { ym, sales: v.sales || 0, txCount: v.txCount || 0, activeDays: v.activeDays || 0, uniqueCustomers: v.uniqueCustomers || 0, cardCount: v.cardCount || 0 };
+    // [2026-09-28] 순고객·영업일수는 월 배치를 쌓아 만드는 값이라 빈 달이 있을 수 있다 → 0 이 아니라 null 로 둔다(fdsEngine 이 그 달을 평균에서 뺀다)
+    const orNull = x => (x === null || x === undefined ? null : x);
+    return { ym, sales: v.sales || 0, txCount: v.txCount || 0, activeDays: orNull(v.activeDays), uniqueCustomers: orNull(v.uniqueCustomers), cardCount: v.cardCount || 0 };
   });
   const active = monthly.filter(m => m.sales > 0 || m.txCount > 0); // 순매출 음수(환불 초과) 달도 결제가 있으면 영업한 달
   const hasData = active.length > 0;
